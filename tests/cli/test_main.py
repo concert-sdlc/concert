@@ -154,3 +154,55 @@ def test_the_proxy_command_serves_until_interrupted() -> None:
 
 
 _ = Callable  # (kept for typing helpers above)
+
+
+def test_the_watchdog_command_runs_the_check_with_the_actions_token() -> None:
+    seen: dict[str, object] = {}
+
+    def fake_watchdog(**kwargs: object) -> list[str]:
+        seen.update(kwargs)
+        return ["alert vm-1"]
+
+    out, err = io.StringIO(), io.StringIO()
+    code = main(
+        [
+            "watchdog",
+            "--repo",
+            "acme/app",
+            "--steering",
+            "7",
+            "--stale-after",
+            "30",
+            "--runners",
+            "vm-1,pm",
+            "--admins",
+            "alice,bob",
+        ],
+        env={"GITHUB_TOKEN": "ghs_x"},
+        stderr=err,
+        stdout=out,
+        watchdog_runner=fake_watchdog,
+        clock=lambda: 5000.0,
+    )
+    assert code == 0 and "alert vm-1" in out.getvalue()
+    assert seen["steering"] == 7 and seen["stale_after"] == 1800 and seen["now"] == 5000
+    assert seen["runners"] == ["vm-1", "pm"] and seen["admins"] == ["alice", "bob"]
+    assert seen["authors"] == {41898282}
+
+
+def test_the_watchdog_needs_its_token_and_arguments() -> None:
+    err = io.StringIO()
+    args = [
+        "watchdog",
+        "--repo",
+        "acme/app",
+        "--steering",
+        "7",
+        "--runners",
+        "vm-1",
+        "--admins",
+        "a",
+    ]
+    assert main(args, env={}, stderr=err) == 2 and "GITHUB_TOKEN" in err.getvalue()
+    err = io.StringIO()
+    assert main(["watchdog", "--repo", "bad"], env={"GITHUB_TOKEN": "x"}, stderr=err) == 2

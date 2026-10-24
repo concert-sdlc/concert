@@ -10,9 +10,11 @@ from typing import TextIO
 
 from concert.cli.settings import Settings, SettingsError
 from concert.cli.wiring import build_service
-from concert.github.http import Transport
+from concert.github.http import GitHubHttp, Transport
+from concert.github.rest import RestGitHub
 from concert.github.transport import UrllibTransport
 from concert.runner.service import Service
+from concert.runner.watchdog import run_watchdog
 from concert.sandbox.egress import Allowlist
 from concert.sandbox.proxy import EgressProxy
 
@@ -28,12 +30,17 @@ def main(
     sleep: Callable[[float], None] = time.sleep,
     stderr: TextIO | None = None,
     proxy_runner: ProxyRunner | None = None,
+    watchdog_runner: Callable[..., list[str]] | None = None,
+    stdout: TextIO | None = None,
+    clock: Callable[[], float] = time.time,
 ) -> int:
     err = stderr if stderr is not None else sys.stderr
     environment = os.environ if env is None else env
     args = _parser().parse_args(argv)
     if args.command == "proxy":
         return _proxy(args, err, proxy_runner or _serve_proxy)
+    if args.command == "watchdog":
+        return _watchdog(args, environment, err, stdout or sys.stdout, watchdog_runner, clock)
     try:
         settings = Settings.from_env(environment)
         service = (
@@ -73,6 +80,54 @@ def _run(
             return 0
 
 
+ACTIONS_BOT_ID = 41898282  # github-actions[bot]: the account behind the workflow's GITHUB_TOKEN
+
+
+def _watchdog(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    err: TextIO,
+    out: TextIO,
+    runner: Callable[..., list[str]] | None,
+    clock: Callable[[], float],
+) -> int:
+    owner, _, repo = str(args.repo).partition("/")
+    token = env.get("GITHUB_TOKEN")
+    problems: list[str] = []
+    if not owner or not repo:
+        problems.append("--repo must look like owner/name")
+    if not token:
+        problems.append("GITHUB_TOKEN is required")
+    if not args.steering:
+        problems.append("--steering is required")
+    if problems:
+        print("concert: " + "; ".join(problems), file=err)
+        return 2
+    run = runner or run_watchdog
+    github = runner_client(owner, repo, token or "")
+    done = run(
+        github=github,
+        steering=args.steering,
+        runners=_split(args.runners),
+        admins=_split(args.admins),
+        stale_after=int(args.stale_after) * 60,
+        now=int(clock()),
+        authors={ACTIONS_BOT_ID},
+    )
+    for line in done:
+        print(line, file=out)
+    return 0
+
+
+def _split(text: str | None) -> list[str]:
+    return [part.strip() for part in (text or "").split(",") if part.strip()]
+
+
+def runner_client(owner: str, repo: str, token: str) -> RestGitHub:
+    http = GitHubHttp(UrllibTransport(require_https=True), token=lambda: token)
+    return RestGitHub(http, owner, repo)
+
+
 def _proxy(args: argparse.Namespace, err: TextIO, run: ProxyRunner) -> int:
     hosts = [h.strip() for h in (args.allow or "").split(",") if h.strip()]
     if not hosts:
@@ -106,6 +161,12 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run", help="run the PM and this runner's worker")
     run.add_argument("--once", action="store_true", help="do one tick and exit")
+    watchdog = commands.add_parser("watchdog", help="alert in Steering when a runner goes quiet")
+    watchdog.add_argument("--repo", required=True)
+    watchdog.add_argument("--steering", type=int)
+    watchdog.add_argument("--stale-after", type=int, default=30, help="minutes of silence")
+    watchdog.add_argument("--runners", default="")
+    watchdog.add_argument("--admins", default="")
     proxy = commands.add_parser("proxy", help="run the egress proxy for sandboxed agents")
     proxy.add_argument("--listen", default="127.0.0.1:3128")
     proxy.add_argument("--allow", help="comma-separated host names agents may reach over https")
