@@ -6,6 +6,7 @@ import pytest
 
 from concert.core.transitions import Status
 from concert.github.heartbeats import read_heartbeat
+from concert.github.mirror import reconcile
 from concert.runner.config import ConfigError
 from concert.runner.service import Service
 from concert.runner.worker import AgentResult, Worker
@@ -37,7 +38,7 @@ class Rig:
     issue: int
 
 
-def rig(yaml: str | None = PROCESS_YAML) -> Rig:
+def rig(yaml: str | None = PROCESS_YAML, steering: bool = False) -> Rig:
     world = World()
     if yaml is not None:
         world.fake.client(PM).commit(
@@ -54,6 +55,7 @@ def rig(yaml: str | None = PROCESS_YAML) -> Rig:
         runner="vm-1",
         base_branch="staging",
         clock=lambda: world.fake.now,
+        steering=world.new_issue() if steering else None,
     )
     return Rig(world, service, issue)
 
@@ -158,3 +160,56 @@ def test_the_worker_takes_its_identities_from_the_configuration() -> None:
     r.service.worker.me = PM.__class__(user_id=0, login="x", is_bot=True)
     tick(r)
     assert r.service.worker.pm.user_id == PM.user_id and r.service.worker.me.user_id == VM1.user_id
+
+
+def test_the_steering_issue_is_not_treated_as_work() -> None:
+    r = rig(steering=True)
+    tick(r)
+    assert r.service.steering is not None
+    assert r.world.state(r.service.steering).status is Status.INBOX
+    assert not [
+        c
+        for c in r.world.pm.list_comments(r.service.steering)
+        if "pm-event" in c.body and "created" in c.body
+    ]
+
+
+def test_pause_stops_new_runs_and_resume_restarts_them() -> None:
+    r = rig(steering=True)
+    steer = r.service.steering or 0
+    r.world.say(ALICE, steer, "/pm pause")
+    r.world.say(ALICE, r.issue, "/dispatch")
+    tick(r, 4)
+    assert r.world.state(r.issue).status is Status.TRIAGE and r.world.active(r.issue) == []
+    r.world.say(ALICE, steer, "/pm resume")
+    tick(r, 6)
+    assert r.world.state(r.issue).status is not Status.TRIAGE
+
+
+def test_reset_through_the_steering_issue_moves_the_issue_once() -> None:
+    r = rig(steering=True)
+    steer = r.service.steering or 0
+    tick(r)
+    r.world.say(ALICE, r.issue, "/dispatch")
+    for _ in range(40):
+        tick(r)
+        if r.world.state(r.issue).status is Status.SPEC_APPROVAL:
+            break
+    r.world.say(ALICE, steer, f"/pm reset #{r.issue} spec")
+    tick(r)
+    assert r.world.state(r.issue).status in (Status.SPEC, Status.SPEC_APPROVAL)
+    tick(r, 3)
+    events = reconcile(
+        r.world.pm, r.world.mirror, steer, r.world.pm.list_comments(steer), PM
+    ).events
+    resets = [e for e in events if e["kind"] == "admin_reset_applied"]
+    assert len(resets) == 1
+
+
+def test_status_through_the_steering_issue_describes_the_board() -> None:
+    r = rig(steering=True)
+    steer = r.service.steering or 0
+    tick(r)
+    r.world.say(ALICE, steer, "/pm status")
+    tick(r)
+    assert any("## Board" in c.body for c in r.world.pm.list_comments(steer))

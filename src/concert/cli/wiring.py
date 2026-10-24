@@ -36,6 +36,7 @@ def build_service(settings: Settings, transport: Transport, clock: Callable[[], 
         runner=settings.runner,
         base_branch=settings.base_branch,
         clock=clock,
+        steering=settings.steering_issue,
     )
 
 

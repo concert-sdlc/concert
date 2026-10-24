@@ -36,6 +36,7 @@ class Settings:
     interval: int
     agent_timeout: int
     docker: DockerSpec
+    steering_issue: int | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "Settings":
@@ -88,6 +89,9 @@ class Settings:
             runtime=env.get("CONCERT_DOCKER_RUNTIME", "runsc"),
             passthrough_env=("ANTHROPIC_API_KEY",),
         )
+        steering = (
+            number("CONCERT_STEERING_ISSUE", 0) or None if "CONCERT_STEERING_ISSUE" in env else None
+        )
         if problems:
             raise SettingsError("; ".join(problems))
         return cls(
@@ -102,4 +106,5 @@ class Settings:
             interval=interval,
             agent_timeout=timeout,
             docker=docker,
+            steering_issue=steering,
         )

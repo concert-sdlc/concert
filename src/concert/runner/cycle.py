@@ -9,6 +9,7 @@ or verified, and while a failed verification has frozen it; reverts and hotfixes
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
+from concert.core.admin import AdminState
 from concert.core.derive import IssueState
 from concert.core.queue import QueueEntry, pick_queue_head
 from concert.core.transitions import Status
@@ -39,16 +40,27 @@ def run_cycle(
     facts: FactsProvider,
     now: int = 0,
     known: Mapping[int, IssueState] | None = None,
+    admin: AdminState | None = None,
 ) -> CycleResult:
     """`known`: the states seen in the previous cycle, so an issue can tell whether the issues
     it waits on have landed (an issue not seen yet counts as unfinished)."""
+    control = admin or AdminState()
     results: dict[int, PollResult] = {}
     errors: dict[int, str] = {}
     for n in issues:
         others = {**(known or {}), **{m: r.state for m, r in results.items()}}
         try:
             results[n] = poll_issue(
-                github, mirror, n, config, facts, now, at_queue_head=False, others=others
+                github,
+                mirror,
+                n,
+                config,
+                facts,
+                now,
+                at_queue_head=False,
+                others=others,
+                held=control.holds(n),
+                reset_to=control.resets.get(n),
             )
         except Exception as error:  # noqa: BLE001  one issue's failure must not stop the others
             errors[n] = f"{type(error).__name__}: {error}"
@@ -71,7 +83,15 @@ def run_cycle(
     others = {**(known or {}), **states}
     try:
         results[chosen.number] = poll_issue(
-            github, mirror, chosen.number, config, facts, now, at_queue_head=True, others=others
+            github,
+            mirror,
+            chosen.number,
+            config,
+            facts,
+            now,
+            at_queue_head=True,
+            others=others,
+            held=control.holds(chosen.number),
         )
     except Exception as error:  # noqa: BLE001
         errors[chosen.number] = f"{type(error).__name__}: {error}"

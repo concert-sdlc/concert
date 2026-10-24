@@ -75,3 +75,10 @@ def test_invalid_values_are_refused_with_the_setting_named(
 
 def test_the_model_api_key_is_passed_into_the_sandbox_by_name_only() -> None:
     assert Settings.from_env(ENV).docker.passthrough_env == ("ANTHROPIC_API_KEY",)
+
+
+def test_the_steering_issue_is_optional_and_numeric() -> None:
+    assert Settings.from_env(ENV).steering_issue is None
+    assert Settings.from_env(ENV | {"CONCERT_STEERING_ISSUE": "3"}).steering_issue == 3
+    with pytest.raises(SettingsError, match="CONCERT_STEERING_ISSUE"):
+        Settings.from_env(ENV | {"CONCERT_STEERING_ISSUE": "x"})

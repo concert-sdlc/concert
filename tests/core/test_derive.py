@@ -684,3 +684,47 @@ def test_typing_an_issue_is_only_allowed_while_it_is_in_the_inbox() -> None:
     journey.move("inbox", "triage", "dispatch")
     journey.add("issue_typed", {"issue_type": "code"})
     assert derive(journey.raw()).status is Status.BLOCKED
+
+
+# --- admin reset -----------------------------------------------------------------------------------
+
+
+def test_an_admin_reset_moves_the_issue_and_clears_its_counter() -> None:
+    journey = to_in_review()
+    journey.add("counter_charged", {"cause": "changes_needed"})
+    journey.add("admin_reset", {"to": "spec", "by": 1})
+    state = derive(journey.raw())
+    assert state.status is Status.SPEC and state.counters.used(AgentState.IMPLEMENTING) == 0
+    assert state.approved_spec_rev is None and state.active_runs == ()
+
+
+def test_resetting_to_a_working_state_keeps_the_approved_spec() -> None:
+    journey = to_in_review()
+    journey.add(
+        "gate_passage",
+        {
+            "comment_id": 3,
+            "verb": "approve",
+            "kind": "spec",
+            "arg": "x",
+            "spec_hash": "s1",
+            "created_at": 5,
+        },
+    )
+    journey.add("admin_reset", {"to": "implementing", "by": 1})
+    state = derive(journey.raw())
+    assert state.status is Status.IMPLEMENTING and state.approved_spec_rev == "s1"
+
+
+def test_a_reset_leaves_a_blocked_issue_and_forgets_its_note() -> None:
+    journey = to_in_review().move("in_review", "blocked", "check_failed")
+    journey.add("admin_reset", {"to": "triage", "by": 1})
+    state = derive(journey.raw())
+    assert state.status is Status.TRIAGE and state.note is None and not state.froze_queue
+
+
+def test_a_finished_issue_cannot_be_reset() -> None:
+    journey = Journey().add("created", {"issue_type": "code"}).move("inbox", "triage", "dispatch")
+    journey.move("triage", "closed_duplicate", "duplicate")
+    journey.add("admin_reset", {"to": "inbox", "by": 1})
+    assert derive(journey.raw()).status is Status.BLOCKED

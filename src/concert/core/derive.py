@@ -28,6 +28,7 @@ from concert.core.transitions import (
     Status,
     Trigger,
     initial_status,
+    is_terminal,
     next_status,
 )
 
@@ -291,6 +292,23 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         if data.get("commit_sha") is not None:
             state = replace(state, head_sha=str(data["commit_sha"]))
         return state
+    if kind == "admin_reset":
+        target = Status(event.data["to"])
+        if is_terminal(state.status):
+            raise _Conflict(f"conflict at seq {event.seq}: a {state.status.value} issue is final")
+        counters = state.counters
+        for counted in AgentState:  # a reset starts every budget over
+            counters = counters.reset(counted)
+        return replace(
+            _fresh_state_bookkeeping(state),
+            status=target,
+            counters=counters,
+            approved_spec_rev=None if target in _UNAPPROVED_TARGETS else state.approved_spec_rev,
+            note=None,
+            froze_queue=False,
+            asked_from=None,
+            question_comment_id=None,
+        )
     if kind == "issue_typed":
         if state.status is not Status.INBOX:
             raise _Conflict(f"conflict at seq {event.seq}: an issue is typed only in the inbox")

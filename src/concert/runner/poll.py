@@ -116,6 +116,7 @@ class PollResult:
     status_reverted: bool = False
     state: IssueState = field(default_factory=IssueState)
     ready_for_integration: bool = False  # in human_uat with every merge requirement met
+    reset_handled: bool = False  # an admin's reset request for this issue no longer needs to wait
     waiting_on: tuple[int, ...] = ()  # issues whose unfinished work is holding this one back
 
 
@@ -129,9 +130,15 @@ def poll_issue(
     load: Mapping[str, int] | None = None,
     at_queue_head: bool = True,
     others: Mapping[int, IssueState] | None = None,
+    held: bool = False,
+    reset_to: Status | None = None,
 ) -> PollResult:
-    """`others`: what is known of the other issues (their derived state), for dependencies."""
-    return _Poll(github, mirror, issue, config, facts, now, load, at_queue_head, others or {}).run()
+    """`others`: what is known of the other issues (their derived state), for dependencies.
+    `held`: an admin paused this issue (or the project): no new runs, no queue entry.
+    `reset_to`: an admin asked for the issue to be forced to this state."""
+    poll = _Poll(github, mirror, issue, config, facts, now, load, at_queue_head, others or {})
+    poll.held, poll.reset_to = held, reset_to
+    return poll.run()
 
 
 class _Poll:
@@ -149,6 +156,9 @@ class _Poll:
     ) -> None:
         self.at_queue_head = at_queue_head
         self.others = others
+        self.held = False
+        self.reset_to: Status | None = None
+        self.reset_handled = False
         self._known: dict[int, bool] = {}
         self.github = github
         self.mirror = mirror
@@ -195,6 +205,7 @@ class _Poll:
         self.chain = [parse_event(event) for event in self.raw]
         if not self.chain:
             self._post([Proposed("created", {"issue_type": "code"})])
+        self._apply_reset()
         self._sync_closed()
         if is_terminal(self.state.status):
             self._effects()  # a duplicate still has to be closed on GitHub
@@ -208,15 +219,26 @@ class _Poll:
         self._admin_reviews()
         self._revert_ci()
         self._effects()
-        if not self._unmet_for_integration():
+        if not self.held and not self._unmet_for_integration():
             self._integrate()
         self._after_merge()
         self._after_verify()
-        if not self._unmet_to_start():
+        if not self.held and not self._unmet_to_start():
             self._runs()
         return self._finish()
 
     # --- steps -----------------------------------------------------------------------------------
+
+    def _apply_reset(self) -> None:
+        """Carry out an admin's `/pm reset`, once. A finished issue cannot be reset."""
+        target = self.reset_to
+        if target is None:
+            return
+        self.reset_handled = True
+        state = self.state
+        if is_terminal(state.status) or state.status is target:
+            return
+        self._post([Proposed("admin_reset", {"to": target.value, "by": "admin"})])
 
     def _sync_closed(self) -> None:
         """Follow the issue being closed or reopened on GitHub: close before the merge ends the
@@ -849,8 +871,10 @@ class _Poll:
             state=state,
             ready_for_integration=state.status is Status.HUMAN_UAT
             and state.blocked_reason is None
+            and not self.held
             and not self._unmet_for_integration()
             and self._gate_ready(),
+            reset_handled=self.reset_handled,
             waiting_on=tuple(
                 sorted(
                     set(self._unmet_to_start())
