@@ -13,6 +13,7 @@ from concert.core.decide import (
     decide,
     plan_integration,
     plan_merged,
+    plan_verify_failure,
 )
 from concert.core.derive import IssueState, derive
 from concert.core.events import Event, append_event
@@ -643,3 +644,87 @@ def test_only_integrating_issues_move_after_a_merge() -> None:
     log.add("outcome", {"key": "merge", "action": "merge", "result": {"sha": "m1"}})
     log.move("integrating", "verifying_staging", "ready_to_merge")
     assert plan_merged(log.state()) == []
+
+
+# --- staging verification failures --------------------------------------------------------------
+
+
+def verifying_log(issue_type: str = "code") -> Log:
+    log = integrating_log() if issue_type == "code" else Log(issue_type)
+    if issue_type == "code":
+        log.add("outcome", {"key": "merge", "action": "merge", "result": {"sha": "m1"}})
+        log.move("integrating", "verifying_staging", "ready_to_merge")
+    return log
+
+
+def verify_handoff(run_id: str, exit_name: str) -> AcceptedHandoff:
+    base = head_handoff(run_id, "verifying_staging", exit_name, "m1")
+    trigger = Trigger.PASSED if exit_name == "passed" else None
+    return AcceptedHandoff(base.handoff, Accepted(trigger=trigger), base.comment_id)
+
+
+def test_a_first_failed_verification_is_re_run_once() -> None:
+    log = verifying_log()
+    proposals = decide(log.state(), [verify_handoff("r-9", "failed")], [])
+    assert kinds(proposals) == ["handoff_accepted", "verify_rerun"]
+    state = log.apply(proposals).state()
+    assert state.status is Status.VERIFYING_STAGING
+    assert state.verify_failures == 1 and state.settled_runs == frozenset()
+
+
+def test_a_second_failed_verification_is_recorded_as_failed() -> None:
+    log = verifying_log()
+    log.apply(decide(log.state(), [verify_handoff("r-9", "failed")], []))
+    proposals = decide(log.state(), [verify_handoff("r-10", "failed")], [])
+    assert kinds(proposals) == ["handoff_accepted", "verify_failed"]
+    state = log.apply(proposals).state()
+    assert state.verify_failed and state.status is Status.VERIFYING_STAGING
+
+
+def test_the_number_of_re_runs_is_configurable() -> None:
+    log = verifying_log()
+    proposals = decide(log.state(), [verify_handoff("r-9", "failed")], [], verify_reruns=0)
+    assert kinds(proposals) == ["handoff_accepted", "verify_failed"]
+
+
+def test_a_passing_verification_moves_to_on_staging() -> None:
+    log = verifying_log()
+    proposals = decide(log.state(), [verify_handoff("r-9", "passed")], [])
+    assert kinds(proposals) == ["handoff_accepted", "transition"]
+    assert log.apply(proposals).state().status is Status.ON_STAGING
+
+
+def failed_log(issue_type: str = "code") -> Log:
+    log = verifying_log(issue_type)
+    log.add("verify_failed", {"run_id": "r-10"})
+    return log
+
+
+def test_a_failure_with_the_freeze_policy_blocks_the_issue() -> None:
+    log = failed_log()
+    proposals = plan_verify_failure(log.state(), on_failure="freeze")
+    assert [p.data["trigger"] for p in proposals] == ["verify_failed"]
+    assert log.apply(proposals).state().status is Status.BLOCKED
+
+
+def test_a_failure_with_the_auto_revert_policy_waits_for_the_revert() -> None:
+    assert plan_verify_failure(failed_log().state(), on_failure="auto_revert") == []
+
+
+def test_a_hotfix_failure_freezes_even_under_auto_revert() -> None:
+    log = failed_log()
+    state = replace(log.state(), issue_type=IssueType.HOTFIX)
+    assert [p.data["trigger"] for p in plan_verify_failure(state, "auto_revert")] == [
+        "verify_failed"
+    ]
+
+
+def test_a_revert_failure_freezes_and_is_never_reverted_again() -> None:
+    state = replace(failed_log().state(), issue_type=IssueType.REVERT)
+    assert [p.data["trigger"] for p in plan_verify_failure(state, "auto_revert")] == [
+        "verify_failed"
+    ]
+
+
+def test_nothing_is_planned_before_the_failure_is_final() -> None:
+    assert plan_verify_failure(verifying_log().state(), on_failure="freeze") == []

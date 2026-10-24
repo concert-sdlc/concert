@@ -23,6 +23,7 @@ from concert.core.decide import (
     decide,
     plan_integration,
     plan_merged,
+    plan_verify_failure,
 )
 from concert.core.derive import IssueState, derive
 from concert.core.effects import Effect, plan_effect
@@ -64,6 +65,8 @@ class RunnerConfig:
     base_branch: str
     runners: Sequence[RunnerInfo] = ()  # runners the PM may assign to; empty: no assignments
     gate_policy: GatePolicy | None = None  # None: CI is not read and nothing integrates
+    on_failure: str = "freeze"  # staging verification: "freeze" or "auto_revert"
+    verify_reruns: int = 1  # automatic re-runs of a failed verification (flaky tests)
 
 
 class FactsProvider(Protocol):
@@ -160,6 +163,7 @@ class _Poll:
         self._effects()
         self._integrate()
         self._after_merge()
+        self._after_verify()
         self._runs()
         return self._finish()
 
@@ -231,7 +235,7 @@ class _Poll:
             return
 
         valid = self._valid_commands(all_comments)
-        proposals = decide(state, accepted, valid)
+        proposals = decide(state, accepted, valid, self.config.verify_reruns)
         if proposals:
             self._post(proposals)
             self._check_branch()
@@ -351,6 +355,11 @@ class _Poll:
         if policy is None or self.state.head_sha is None:
             return False
         return isinstance(evaluate_gate(self.state.head_sha, self.state.evidence, policy), Ready)
+
+    def _after_verify(self) -> None:
+        planned = plan_verify_failure(self.state, self.config.on_failure)
+        if planned:
+            self._post(planned)
 
     def _after_merge(self) -> None:
         planned = plan_merged(self.state)

@@ -84,10 +84,11 @@ def decide(
     state: IssueState,
     handoffs: Sequence[AcceptedHandoff],
     commands: Sequence[ValidCommand],
+    verify_reruns: int = 1,
 ) -> list[Proposed]:
     if state.blocked_reason is not None or is_terminal(state.status):
         return []
-    from_handoffs = _from_handoffs(state, handoffs)
+    from_handoffs = _from_handoffs(state, handoffs, verify_reruns)
     if from_handoffs:
         return from_handoffs
     return _from_commands(state, commands)
@@ -96,7 +97,9 @@ def decide(
 # --- handoffs --------------------------------------------------------------------------------
 
 
-def _from_handoffs(state: IssueState, handoffs: Sequence[AcceptedHandoff]) -> list[Proposed]:
+def _from_handoffs(
+    state: IssueState, handoffs: Sequence[AcceptedHandoff], verify_reruns: int
+) -> list[Proposed]:
     pending = sorted(
         (
             h
@@ -111,6 +114,12 @@ def _from_handoffs(state: IssueState, handoffs: Sequence[AcceptedHandoff]) -> li
     if state.status is Status.IN_REVIEW:
         return _review_round(state, pending)
     first = pending[0]
+    if state.status is Status.VERIFYING_STAGING and first.handoff.exit == "failed":
+        final = state.verify_failures >= verify_reruns
+        again = Proposed(
+            "verify_failed" if final else "verify_rerun", {"run_id": first.handoff.run_id}
+        )
+        return [_accepted(first), again]
     if state.status is Status.INTEGRATING and first.decision.trigger is Trigger.READY_TO_MERGE:
         return [_accepted(first)]  # the issue moves on once the PM has merged
     return [
@@ -292,3 +301,14 @@ def plan_merged(state: IssueState) -> list[Proposed]:
     if state.status is not Status.INTEGRATING or state.merge_sha is None:
         return []
     return _trigger_events(state, Trigger.READY_TO_MERGE)
+
+
+def plan_verify_failure(state: IssueState, on_failure: str) -> list[Proposed]:
+    """A final verification failure freezes (blocks) the issue. Under `auto_revert` a plain code
+    issue instead waits for its revert; hotfixes and reverts always freeze, since reverting a
+    revert would re-apply the breaking merge."""
+    if state.status is not Status.VERIFYING_STAGING or not state.verify_failed:
+        return []
+    if on_failure == "auto_revert" and state.issue_type is IssueType.CODE:
+        return []
+    return _trigger_events(state, Trigger.VERIFY_FAILED)

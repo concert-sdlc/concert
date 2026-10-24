@@ -55,3 +55,45 @@ def test_a_pass_reported_for_another_commit_is_not_accepted() -> None:
     result = world.poll(issue)
     assert result.status is Status.VERIFYING_STAGING
     assert len(result.invalid_handoffs) == 1
+
+
+def fail_verification(world: World, issue: int, merge: str) -> None:
+    run = world.assign(issue, head=merge)
+    world.handoff(
+        issue,
+        run,
+        "verifying_staging",
+        "failed",
+        commit_sha=merge,
+        artifact_rev=world.state(issue).approved_spec_rev,
+    )
+
+
+def test_a_failed_verification_is_re_run_once_before_the_issue_is_frozen() -> None:
+    world, issue, merge = merged_world()
+    fail_verification(world, issue, merge)
+    assert world.poll(issue).status is Status.VERIFYING_STAGING
+    assert world.state(issue).verify_failures == 1
+    # the re-run is assigned and fails too
+    fail_verification(world, issue, merge)
+    result = world.poll(issue)
+    assert result.status is Status.BLOCKED
+    assert world.pm.get_status(issue) == "blocked"
+
+
+def test_under_auto_revert_a_final_failure_does_not_block_a_code_issue() -> None:
+    world, issue, merge = merged_world()
+    world.config = replace(world.config, on_failure="auto_revert")
+    fail_verification(world, issue, merge)
+    world.poll(issue)
+    fail_verification(world, issue, merge)
+    result = world.poll(issue)
+    assert result.status is Status.VERIFYING_STAGING
+    assert world.state(issue).verify_failed
+
+
+def test_the_number_of_re_runs_comes_from_the_config() -> None:
+    world, issue, merge = merged_world()
+    world.config = replace(world.config, verify_reruns=0)
+    fail_verification(world, issue, merge)
+    assert world.poll(issue).status is Status.BLOCKED

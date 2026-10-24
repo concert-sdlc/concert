@@ -81,6 +81,8 @@ class IssueState:
     pending_intents: tuple[Intent, ...] = ()
     pr_number: int | None = None
     pr_ready: bool = False
+    verify_failures: int = 0  # failed staging verifications so far, re-runs included
+    verify_failed: bool = False  # the failure is final: no re-run is left
     merge_sha: str | None = None  # the merge commit on the base branch, once the PM merged
     evidence: tuple[Evidence, ...] = ()  # results and approvals, in order, each bound to a head
 
@@ -123,6 +125,8 @@ def _fresh_state_bookkeeping(state: IssueState) -> IssueState:
         active_runs=(),
         settled_runs=frozenset(),
         settled_reviewers=frozenset(),
+        verify_failures=0,
+        verify_failed=False,
         infra_attempts=MappingProxyType({}),
         last_expiry_at=None,
     )
@@ -220,6 +224,15 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         if data.get("commit_sha") is not None:
             state = replace(state, head_sha=str(data["commit_sha"]))
         return state
+    if kind == "verify_rerun":
+        return replace(
+            state,
+            verify_failures=state.verify_failures + 1,
+            settled_runs=frozenset(),
+            settled_reviewers=frozenset(),
+        )
+    if kind == "verify_failed":
+        return replace(state, verify_failed=True)
     if kind == "intent":
         data = dict(event.data)
         key, action = str(data.pop("key")), str(data.pop("action"))

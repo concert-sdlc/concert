@@ -418,3 +418,31 @@ def test_a_failed_merge_outcome_resolves_the_intent_without_a_merge() -> None:
     journey.add("outcome", {"key": "merge", "result": {"error": "stale head"}})
     state = derive(journey.raw())
     assert state.merge_sha is None and state.pending_intents == ()
+
+
+def test_verify_rerun_counts_the_failure_and_clears_the_settled_run() -> None:
+    journey = to_in_review().move("in_review", "uat", "clean").move("uat", "human_uat", "passed")
+    journey.move("human_uat", "integrating", "approve_uat")
+    journey.move("integrating", "verifying_staging", "ready_to_merge")
+    journey.add(
+        "handoff_accepted",
+        {"run_id": "r-1", "state": "verifying_staging", "commit_sha": "m1", "artifact_rev": None},
+    )
+    assert derive(journey.raw()).settled_runs == frozenset({"r-1"})
+    journey.add("verify_rerun", {"run_id": "r-1"})
+    state = derive(journey.raw())
+    assert state.verify_failures == 1 and state.settled_runs == frozenset()
+    assert state.verify_failed is False
+    journey.add("verify_failed", {"run_id": "r-2"})
+    assert derive(journey.raw()).verify_failed is True
+
+
+def test_verification_failures_start_over_when_the_issue_returns_to_verifying() -> None:
+    journey = to_in_review().move("in_review", "uat", "clean").move("uat", "human_uat", "passed")
+    journey.move("human_uat", "integrating", "approve_uat")
+    journey.move("integrating", "verifying_staging", "ready_to_merge")
+    journey.add("verify_rerun", {"run_id": "r-1"})
+    journey.add("verify_failed", {"run_id": "r-2"})
+    journey.move("verifying_staging", "implementing", "failed_reverted")
+    assert derive(journey.raw()).verify_failures == 0
+    assert derive(journey.raw()).verify_failed is False
