@@ -77,6 +77,10 @@ _AGENT_STATES = frozenset(
     }
 )
 
+# Re-entries are charged at the returning transition, so a rejection at a gate can also
+# exceed the budget.
+_BUDGETED_STATES = _AGENT_STATES | {_S.SPEC_APPROVAL, _S.HUMAN_UAT}
+
 _CODE_TABLE: dict[tuple[Status, Trigger], Status] = {
     (_S.INBOX, _T.DISPATCH): _S.TRIAGE,
     (_S.TRIAGE, _T.SPEC): _S.SPEC,
@@ -99,7 +103,7 @@ _CODE_TABLE: dict[tuple[Status, Trigger], Status] = {
     (_S.VERIFYING_STAGING, _T.PASSED): _S.ON_STAGING,
     (_S.VERIFYING_STAGING, _T.FAILED_REVERTED): _S.IMPLEMENTING,
     (_S.VERIFYING_STAGING, _T.VERIFY_FAILED): _S.BLOCKED,  # freeze fallback
-    **{(state, _T.BUDGET_EXCEEDED): _S.BLOCKED for state in _AGENT_STATES},
+    **{(state, _T.BUDGET_EXCEEDED): _S.BLOCKED for state in _BUDGETED_STATES},
 }
 
 # A hotfix runs the full lifecycle, but a failed verification of its own merge is never

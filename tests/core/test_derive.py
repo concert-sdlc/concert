@@ -158,3 +158,33 @@ def test_a_stale_epoch_event_is_ignored() -> None:
 def test_derive_is_deterministic() -> None:
     raw = to_in_review().raw()
     assert derive(raw) == derive(raw)
+
+
+# --- events that record consumed inputs ---------------------------------------------------------
+
+
+def test_accepted_runs_and_consumed_commands_are_remembered() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("handoff_accepted", {"run_id": "r-1"})
+    journey.add("gate_passage", {"comment_id": 12, "verb": "dispatch"})
+    state = derive(journey.raw())
+    assert state.accepted_runs == frozenset({"r-1"})
+    assert state.consumed_commands == frozenset({12})
+
+
+def test_an_unblock_event_moves_a_blocked_issue_to_the_named_state() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.move("inbox", "triage", "dispatch")
+    journey.move("triage", "blocked", "budget_exceeded")
+    journey.add("unblocked", {"to": "triage"})
+    state = derive(journey.raw())
+    assert state.status is Status.TRIAGE
+    assert state.blocked_reason is None
+
+
+def test_an_unblock_event_on_an_issue_that_is_not_blocked_is_a_conflict() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("unblocked", {"to": "triage"})
+    state = derive(journey.raw())
+    assert state.status is Status.BLOCKED
+    assert state.blocked_reason is not None and "conflict" in state.blocked_reason

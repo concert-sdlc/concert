@@ -62,3 +62,8 @@ def test_terminal_states_have_no_outgoing_transition(status: Status) -> None:
 def test_gates_and_agent_states_are_not_terminal() -> None:
     assert not is_terminal(Status.HUMAN_UAT)
     assert not is_terminal(Status.BLOCKED)
+
+
+@pytest.mark.parametrize("status", [S.SPEC_APPROVAL, S.HUMAN_UAT])
+def test_a_rejection_at_a_gate_that_exceeds_the_budget_goes_to_blocked(status: Status) -> None:
+    assert next_status(status, Trigger.BUDGET_EXCEEDED) is S.BLOCKED

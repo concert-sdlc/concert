@@ -31,9 +31,7 @@ from concert.core.transitions import (
 DEFAULT_BUDGET = 4
 
 # Event kinds that are part of the log but do not change status or counters.
-_RECORD_ONLY = frozenset(
-    {"assignment", "intent", "outcome", "reconciled", "admin_command", "gate_passage"}
-)
+_RECORD_ONLY = frozenset({"assignment", "intent", "outcome", "reconciled", "admin_command"})
 
 
 @dataclass(frozen=True)
@@ -43,6 +41,8 @@ class IssueState:
     counters: RetryCounters = field(default_factory=lambda: RetryCounters(budget=DEFAULT_BUDGET))
     blocked_reason: str | None = None
     last_seq: int = 0
+    accepted_runs: frozenset[str] = frozenset()  # run_ids whose handoff the PM accepted
+    consumed_commands: frozenset[int] = frozenset()  # comment ids of commands that passed a gate
 
 
 class _Conflict(Exception):
@@ -115,6 +115,18 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         return replace(state, counters=counters)
     if kind == "counter_reset":
         return replace(state, counters=state.counters.reset(AgentState(event.data["state"])))
+    if kind == "handoff_accepted":
+        return replace(state, accepted_runs=state.accepted_runs | {str(event.data["run_id"])})
+    if kind == "gate_passage":
+        return replace(
+            state, consumed_commands=state.consumed_commands | {int(event.data["comment_id"])}
+        )
+    if kind == "unblocked":
+        if state.status is not Status.BLOCKED:
+            raise _Conflict(
+                f"conflict at seq {event.seq}: unblocked but the issue is in {state.status.value}"
+            )
+        return replace(state, status=Status(event.data["to"]))
     if kind in _RECORD_ONLY:
         return state
     raise ValueError(f"unknown event kind {kind!r} at seq {event.seq}")
