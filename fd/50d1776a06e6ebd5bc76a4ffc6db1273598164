@@ -1,0 +1,23 @@
+tests/core/test_commands.py
+  s_4aba28ccdf2cb3::t_416ee4539560cb 1-232
+  s_4aba28ccdf2cb3::t_eb83def934ae31 233-239
+src/concert/core/commands.py
+  s_4aba28ccdf2cb3::t_cff4dc530850a7 1-222
+  s_4aba28ccdf2cb3::t_c7cff7bb5400c1 223-243
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fd50d1776a06e6ebd5bc76a4ffc6db1273598164",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
