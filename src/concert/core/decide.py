@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from concert.core.commands import Actor, Command
-from concert.core.counters import AgentState, Cause, Outcome
+from concert.core.counters import AgentState, Cause, Outcome, charge_target
 from concert.core.derive import IssueState
 from concert.core.evidence import GatePolicy, Ready, evaluate_gate
 from concert.core.handoff import Accepted, Handoff, consolidate_reviews
@@ -304,17 +304,26 @@ def _trigger_events(state: IssueState, trigger: Trigger | None) -> list[Proposed
         return []
     cause = _CAUSE.get(trigger)
     charge: list[Proposed] = []
+    note: str | None = None
     if cause is not None:
         _counters, outcome = state.counters.charge(cause)
         if outcome is Outcome.BLOCKED:
             trigger = Trigger.BUDGET_EXCEEDED
+            note = (
+                f"retry budget exceeded: {cause.value} "
+                f"(already returned {state.counters.budget} times for {charge_target(cause).value})"
+            )
         else:
             charge = [Proposed("counter_charged", {"cause": cause.value})]
     target = next_status(state.status, trigger, state.issue_type)
-    move = Proposed(
-        "transition", {"from": state.status.value, "to": target.value, "trigger": trigger.value}
-    )
-    return [*charge, move]
+    data: dict[str, Any] = {
+        "from": state.status.value,
+        "to": target.value,
+        "trigger": trigger.value,
+    }
+    if note is not None:
+        data["note"] = note
+    return [*charge, Proposed("transition", data)]
 
 
 # --- integration -----------------------------------------------------------------------------

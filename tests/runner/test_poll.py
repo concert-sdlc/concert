@@ -315,3 +315,23 @@ def test_a_handoff_for_another_state_is_left_alone_without_reading_facts() -> No
     result = world.poll(issue)
     assert result.status is Status.TRIAGE
     assert spy.calls == 0 and result.ignored_handoffs == [] and result.invalid_handoffs == []
+
+
+def test_a_broken_event_log_is_explained_without_offering_an_unblock() -> None:
+    world = World()
+    issue = world.new_issue()
+    world.poll(issue)
+    world.say(ALICE, issue, "/dispatch")
+    world.poll(issue)
+    first = next(c for c in world.pm.list_comments(issue) if c.author.user_id == 900)
+    world.fake.tick(3)
+    world.pm.edit_comment(first.id, first.body)
+    world.poll(issue)
+    world.poll(issue)
+    notes = [
+        c.body
+        for c in world.pm.list_comments(issue)
+        if c.body.startswith("## This issue is blocked")
+    ]
+    assert len(notes) == 1
+    assert "seq 1" in notes[0] and "/unblock" not in notes[0] and "has to look at this" in notes[0]

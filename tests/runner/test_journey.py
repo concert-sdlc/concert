@@ -181,3 +181,38 @@ def test_a_merge_that_breaks_staging_is_reverted_and_the_issue_lands_again() -> 
     project.run_until(Status.ON_STAGING)
     staging = world.pm.get_ref("staging") or ""
     assert world.pm.read_tree(staging)["backend/export.py"] == "fixed"
+
+
+def test_an_issue_that_can_never_pass_review_is_blocked_with_a_useful_comment() -> None:
+    project = Project()
+    project.agent = Sequenced(
+        project.agent,
+        in_review=[AgentResult(exit="changes_needed", doubts=("the export drops rows",))],
+    )
+    project.worker.agent = project.agent
+    world, issue = project.world, project.issue
+    project.step()
+    project.human("/dispatch")
+    project.run_until(Status.SPEC_APPROVAL)
+    project.human(f"/approve spec {world.state(issue).spec_rev}")
+    project.run_until(Status.BLOCKED)
+    implementing_runs = [t for t in project.agent.tasks if t.state == "implementing"]
+    assert len(implementing_runs) == 5  # the first run and four re-entries
+    [comment] = [
+        c.body
+        for c in world.pm.list_comments(issue)
+        if c.body.startswith("## This issue is blocked")
+    ]
+    assert "retry budget exceeded" in comment and "changes_needed" in comment
+    assert "/unblock implementing" in comment
+    project.step()
+    assert (
+        len(
+            [
+                c
+                for c in world.pm.list_comments(issue)
+                if c.body.startswith("## This issue is blocked")
+            ]
+        )
+        == 1
+    )

@@ -905,3 +905,21 @@ def test_accepted_handoffs_carry_the_agents_doubts() -> None:
     )
     proposals = decide(log.state(), [AcceptedHandoff(parsed, item.decision, item.comment_id)], [])
     assert proposals[0].data["doubts"] == ["Which formats?"]
+
+
+def test_an_exhausted_budget_blocks_with_the_cause_in_the_note() -> None:
+    log = log_at("in_review")
+    for _ in range(4):
+        log.add("counter_charged", {"cause": "changes_needed"})
+    proposals = decide(
+        log.state(),
+        [
+            handoff("r-7", "in_review", "changes_needed", reviewer="code"),
+            handoff("r-8", "in_review", "clean", reviewer="security"),
+        ],
+        [],
+    )
+    move = proposals[-1]
+    assert move.data["to"] == "blocked" and move.data["trigger"] == "budget_exceeded"
+    assert "retry budget" in str(move.data["note"]) and "changes_needed" in str(move.data["note"])
+    assert log.apply(proposals).state().note == move.data["note"]

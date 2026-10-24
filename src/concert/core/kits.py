@@ -190,3 +190,34 @@ def _escape(text: str) -> str:
 
 def _single_line(text: str) -> str:
     return _escape(text).strip()
+
+
+def blocker_marker(key: str) -> str:
+    return f"<!-- pm-blocked:{key} -->"
+
+
+def render_blocker(reason: str, targets: Sequence[str], key: str) -> str:
+    """Why the issue stopped, and the commands that can move it on."""
+    shown = _escape(reason).replace("@", "@\u200b").replace("\n", " ").strip()
+    options = [f"/unblock {target}" for target in targets]
+    return "\n".join(
+        [
+            "## This issue is blocked",
+            "",
+            f"> {shown}",
+            "",
+            *(
+                [
+                    "An approver can send it on from here, choosing where it restarts:",
+                    "",
+                    "```",
+                    *options,
+                    "```",
+                    "",
+                ]
+                if options
+                else ["An approver or admin has to look at this before it can go on.", ""]
+            ),
+            blocker_marker(key),
+        ]
+    )

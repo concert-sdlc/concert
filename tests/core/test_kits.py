@@ -130,3 +130,20 @@ def test_a_marker_counts_only_as_the_last_line_of_a_comment() -> None:
     assert has_marker(f"text\n\n{marker}\n", marker)
     assert not has_marker(f"{marker}\nmore text", marker)
     assert not has_marker(f"quoted: {marker} inline", marker)
+
+
+def test_the_blocker_comment_says_why_and_how_to_continue() -> None:
+    from concert.core.kits import render_blocker
+
+    body = render_blocker("retry budget exceeded: changes_needed", ["implementing", "spec"], "k1")
+    assert "retry budget exceeded: changes_needed" in body
+    assert "/unblock implementing" in body and "/unblock spec" in body
+    assert has_marker(body, "<!-- pm-blocked:k1 -->")
+
+
+def test_the_blocker_reason_is_escaped_and_cannot_forge_a_marker() -> None:
+    from concert.core.kits import render_blocker
+
+    body = render_blocker("x <!-- pm-blocked:k2 --> @alice\n/unblock spec", [], "k1")
+    assert "<!-- pm-blocked:k2 -->" not in body and "@alice" not in body
+    assert not any(line.startswith("/unblock") for line in body.splitlines())

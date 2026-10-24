@@ -7,6 +7,7 @@ state. Everything that decides lives in `core`; this module moves data and perfo
 idempotent side effects (creating the issue branch, fast-forwarding it to an accepted commit).
 """
 
+import hashlib
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -41,9 +42,11 @@ from concert.core.handoff import (
 )
 from concert.core.kits import (
     KitFacts,
+    blocker_marker,
     has_marker,
     kit_marker,
     question_marker,
+    render_blocker,
     render_question,
     render_spec_kit,
     render_uat_kit,
@@ -209,6 +212,21 @@ class _Poll:
             self._post([self._move(state.status, Status.CLOSED, Trigger.CLOSE)])
         elif not state.close_noted:
             self._post([Proposed("closed_after_merge", {})])
+
+    def _blocker_comment(self, state: IssueState) -> None:
+        """Say why the issue is blocked and what can move it, once per block (found by marker)."""
+        if state.status is not Status.BLOCKED:
+            return
+        reason = state.blocked_reason or state.note or "blocked"
+        key = hashlib.sha1(f"{reason}|{state.last_seq}".encode()).hexdigest()[:12]  # an id only
+        marker = blocker_marker(key)
+        for comment in self.github.list_comments(self.issue):
+            if comment.author.user_id == self.config.pm.user_id and has_marker(
+                comment.body, marker
+            ):
+                return
+        targets = [] if state.blocked_reason else sorted(s.value for s in unblock_targets(state))
+        self.github.add_comment(self.issue, render_blocker(reason, targets, key))
 
     def _move(self, source: Status, target: Status, trigger: Trigger) -> Proposed:
         return Proposed(
@@ -715,6 +733,7 @@ class _Poll:
             if blocked
             else self.state
         )
+        self._blocker_comment(state)
         if self.github.get_status(self.issue) != state.status.value:
             self.github.set_status(self.issue, state.status.value)
         return PollResult(
