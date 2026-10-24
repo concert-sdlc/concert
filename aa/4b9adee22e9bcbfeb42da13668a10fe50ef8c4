@@ -1,0 +1,45 @@
+src/concert/cli/settings.py
+  s_4aba28ccdf2cb3::t_74117d69c565bc 39,92-94,109
+src/concert/cli/wiring.py
+  s_4aba28ccdf2cb3::t_d453fe9668ea4b 39
+src/concert/core/derive.py
+  s_4aba28ccdf2cb3::t_276b401e0c024a 31,295-311
+src/concert/runner/admin.py
+  s_4aba28ccdf2cb3::t_e67a021344b401 1-99
+src/concert/runner/cycle.py
+  s_4aba28ccdf2cb3::t_edb8f7aef21025 12,43,47,54-63,86-94
+src/concert/runner/poll.py
+  s_4aba28ccdf2cb3::t_5a7d77bb79c3ea 119,133-134,136-141,159-161,208,222,226,232-242,874,877
+src/concert/runner/service.py
+  s_4aba28ccdf2cb3::t_26e7942aa774d4 13,19,23,39,43,57-58,60-67,69-71,80-93
+src/concert/runner/status.py
+  s_4aba28ccdf2cb3::t_253c1fa8ce3742 1-54
+tests/cli/test_settings.py
+  s_4aba28ccdf2cb3::t_c55b1b98275085 78-84
+tests/core/test_derive.py
+  s_4aba28ccdf2cb3::t_b38f0bc9758aec 687-730
+tests/runner/test_admin.py
+  s_4aba28ccdf2cb3::t_536cf513736a49 1-116
+tests/runner/test_admin_effects.py
+  s_4aba28ccdf2cb3::t_664cedebd0b19a 1-146
+tests/runner/test_service.py
+  s_4aba28ccdf2cb3::t_4b1899f0e37257 9,41,58,163-215
+tests/runner/test_status.py
+  s_4aba28ccdf2cb3::t_075265036f0045 1-51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "aa4b9adee22e9bcbfeb42da13668a10fe50ef8c4",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
