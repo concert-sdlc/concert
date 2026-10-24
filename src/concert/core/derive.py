@@ -36,7 +36,7 @@ DEFAULT_BUDGET = 4
 _UNAPPROVED_TARGETS = frozenset({Status.SPEC, Status.SPEC_APPROVAL})
 
 # Event kinds that are part of the log but do not change status or counters.
-_RECORD_ONLY = frozenset({"assignment", "intent", "outcome", "reconciled", "admin_command"})
+_RECORD_ONLY = frozenset({"assignment", "reconciled", "admin_command"})
 
 
 @dataclass(frozen=True)
@@ -47,6 +47,15 @@ class ActiveRun:
     reviewer: str | None
     head: str | None  # the branch head the run started from
     issued_at: int
+
+
+@dataclass(frozen=True)
+class Intent:
+    """An external side effect the PM announced and has not yet recorded an outcome for."""
+
+    key: str
+    action: str
+    data: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -69,6 +78,9 @@ class IssueState:
     last_expiry_at: int | None = None
     note: str | None = None  # why a check blocked the issue
     branch_base: str | None = None  # the branch-creation commit recorded by the PM
+    pending_intents: tuple[Intent, ...] = ()
+    pr_number: int | None = None
+    pr_ready: bool = False
     evidence: tuple[Evidence, ...] = ()  # results and approvals, in order, each bound to a head
 
 
@@ -206,6 +218,30 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             state = replace(state, spec_rev=str(data["artifact_rev"]))
         if data.get("commit_sha") is not None:
             state = replace(state, head_sha=str(data["commit_sha"]))
+        return state
+    if kind == "intent":
+        data = dict(event.data)
+        key, action = str(data.pop("key")), str(data.pop("action"))
+        return replace(
+            state,
+            pending_intents=(
+                *(i for i in state.pending_intents if i.key != key),
+                Intent(key, action, data),
+            ),
+        )
+    if kind == "outcome":
+        data = event.data
+        key = str(data["key"])
+        pending = next((i for i in state.pending_intents if i.key == key), None)
+        action = pending.action if pending is not None else str(data.get("action"))
+        result: Mapping[str, Any] = data.get("result") or {}
+        state = replace(
+            state, pending_intents=tuple(i for i in state.pending_intents if i.key != key)
+        )
+        if action == "open_pr":
+            return replace(state, pr_number=int(result["number"]))
+        if action == "mark_ready":
+            return replace(state, pr_ready=True)
         return state
     if kind == "evidence":
         data = event.data

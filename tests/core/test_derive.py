@@ -357,3 +357,47 @@ def test_evidence_events_are_collected_in_order() -> None:
         ("approval", "uat", "h1", True, 2),
     ]
     assert state.evidence[0].workflow_hash == "w1" and state.evidence[0].policy_rev == "p1"
+
+
+# --- side effects: intent and outcome ----------------------------------------------------------
+
+
+def test_an_intent_without_an_outcome_is_pending() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("intent", {"key": "open_pr", "action": "open_pr", "branch": "pm/1"})
+    state = derive(journey.raw())
+    assert [(i.key, i.action, dict(i.data)) for i in state.pending_intents] == [
+        ("open_pr", "open_pr", {"branch": "pm/1"})
+    ]
+
+
+def test_an_outcome_resolves_its_intent_and_records_the_pr() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("intent", {"key": "open_pr", "action": "open_pr", "branch": "pm/1"})
+    journey.add("outcome", {"key": "open_pr", "result": {"number": 7}})
+    state = derive(journey.raw())
+    assert state.pending_intents == ()
+    assert state.pr_number == 7
+    assert state.pr_ready is False
+
+
+def test_a_mark_ready_outcome_records_that_the_pr_is_ready() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("outcome", {"key": "open_pr", "result": {"number": 7}})
+    journey.add("intent", {"key": "ready", "action": "mark_ready", "number": 7})
+    journey.add("outcome", {"key": "ready", "result": {"number": 7}})
+    assert derive(journey.raw()).pr_ready is True
+
+
+def test_an_outcome_for_an_unknown_intent_is_still_applied() -> None:
+    # a reconciled recovery may record an outcome the intent of which was in a lost comment
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("outcome", {"key": "open_pr", "action": "open_pr", "result": {"number": 3}})
+    assert derive(journey.raw()).pr_number == 3
+
+
+def test_announcing_the_same_intent_twice_leaves_one_pending() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("intent", {"key": "open_pr", "action": "open_pr", "head": "pm/1"})
+    journey.add("intent", {"key": "open_pr", "action": "open_pr", "head": "pm/1"})
+    assert len(derive(journey.raw()).pending_intents) == 1

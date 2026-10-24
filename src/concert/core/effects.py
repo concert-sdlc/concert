@@ -1,0 +1,56 @@
+"""The external side effect an issue needs next.
+
+Pure. Each effect is announced with an `intent` event before it is performed and closed with an
+`outcome` event after, so a crash between the two is resolved on the next poll: a pending intent
+is resumed first, and every effect is idempotent by key (the caller looks for the PR before it
+opens one, and marking a PR ready twice changes nothing).
+"""
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
+
+from concert.core.derive import IssueState
+from concert.core.transitions import IssueType, Status, is_terminal
+
+# States that come before the spec is ready, or have no work: no PR exists or is wanted yet.
+_NO_PR_YET = frozenset(
+    {Status.INBOX, Status.TRIAGE, Status.SPEC, Status.NEEDS_INPUT, Status.BLOCKED}
+)
+# From review on, the PR is out of draft.
+_READY_STATES = frozenset(
+    {
+        Status.IN_REVIEW,
+        Status.UAT,
+        Status.HUMAN_UAT,
+        Status.INTEGRATING,
+        Status.VERIFYING_STAGING,
+    }
+)
+
+
+@dataclass(frozen=True)
+class Effect:
+    key: str
+    action: str
+    data: Mapping[str, Any]
+    resumed: bool  # true when the intent is already in the log
+
+
+def plan_effect(state: IssueState, issue: int, base_branch: str) -> Effect | None:
+    if state.pending_intents:
+        pending = state.pending_intents[0]
+        return Effect(pending.key, pending.action, pending.data, resumed=True)
+    if is_terminal(state.status):
+        return None
+    if (
+        state.pr_number is None
+        and state.branch_base is not None
+        and state.status not in _NO_PR_YET
+        and state.issue_type is not IssueType.REVERT
+    ):
+        data = {"head": f"pm/{issue}", "base": base_branch, "title": f"Concert #{issue}"}
+        return Effect("open_pr", "open_pr", data, resumed=False)
+    if state.pr_number is not None and not state.pr_ready and state.status in _READY_STATES:
+        return Effect("ready", "mark_ready", {"number": state.pr_number}, resumed=False)
+    return None
