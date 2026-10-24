@@ -329,3 +329,31 @@ def test_the_branch_creation_commit_is_remembered() -> None:
     journey.add("branch_created", {"branch": "pm/7", "sha": "base111"})
     state = derive(journey.raw())
     assert state.branch_base == "base111"
+
+
+# --- evidence ----------------------------------------------------------------------------------
+
+
+def test_evidence_events_are_collected_in_order() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add(
+        "evidence",
+        {
+            "kind": "ci",
+            "item": "tests",
+            "head_sha": "h1",
+            "passed": True,
+            "policy_rev": "p1",
+            "workflow_hash": "w1",
+        },
+    )
+    journey.add(
+        "evidence",
+        {"kind": "approval", "item": "uat", "head_sha": "h1", "passed": True, "actor_id": 2},
+    )
+    state = derive(journey.raw())
+    assert [(e.kind, e.item, e.head_sha, e.passed, e.actor_id) for e in state.evidence] == [
+        ("ci", "tests", "h1", True, None),
+        ("approval", "uat", "h1", True, 2),
+    ]
+    assert state.evidence[0].workflow_hash == "w1" and state.evidence[0].policy_rev == "p1"

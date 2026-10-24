@@ -16,6 +16,7 @@ from typing import Any
 from concert.core.commands import Actor, Command
 from concert.core.counters import AgentState, Cause, Outcome
 from concert.core.derive import IssueState
+from concert.core.evidence import GatePolicy, Ready, evaluate_gate
 from concert.core.handoff import Accepted, Handoff, consolidate_reviews
 from concert.core.transitions import IssueType, Status, Trigger, is_terminal, next_status
 
@@ -63,9 +64,18 @@ _GATES: dict[tuple[Status, IssueType, str, str | None], Trigger] = {
     (Status.SPEC_APPROVAL, IssueType.HOTFIX, "reject", "spec"): Trigger.REJECT_SPEC,
     (Status.HUMAN_UAT, IssueType.CODE, "reject", "uat"): Trigger.REJECT_UAT,
     (Status.HUMAN_UAT, IssueType.HOTFIX, "reject", "uat"): Trigger.REJECT_UAT,
-    (Status.HUMAN_UAT, IssueType.REVERT, "approve", "revert"): Trigger.APPROVE_REVERT,
     (Status.HUMAN_UAT, IssueType.REVERT, "reject", "revert"): Trigger.REJECT_REVERT,
 }
+
+# (status, verb, kind) -> approval evidence kept in the ledger; the move to integrating is
+# planned separately once the whole gate holds and the issue is at the head of the queue.
+_APPROVALS = frozenset(
+    {
+        (Status.HUMAN_UAT, "approve", "uat"),
+        (Status.HUMAN_UAT, "approve", "security"),
+        (Status.HUMAN_UAT, "approve", "revert"),
+    }
+)
 
 _COUNTED_STATES = {state.value: state for state in AgentState}
 
@@ -101,7 +111,11 @@ def _from_handoffs(state: IssueState, handoffs: Sequence[AcceptedHandoff]) -> li
     if state.status is Status.IN_REVIEW:
         return _review_round(state, pending)
     first = pending[0]
-    return [_accepted(first), *_trigger_events(state, first.decision.trigger)]
+    return [
+        _accepted(first),
+        *_run_evidence(first),
+        *_trigger_events(state, first.decision.trigger),
+    ]
 
 
 def _review_round(state: IssueState, pending: Sequence[AcceptedHandoff]) -> list[Proposed]:
@@ -115,7 +129,43 @@ def _review_round(state: IssueState, pending: Sequence[AcceptedHandoff]) -> list
     used = [by_reviewer[name] for name in sorted(REVIEWERS)]
     outcome = consolidate_reviews([item.handoff.exit for item in used])
     trigger = {"clean": Trigger.CLEAN, "changes_needed": Trigger.CHANGES_NEEDED}.get(outcome)
-    return [*(_accepted(item) for item in used), *_trigger_events(state, trigger)]
+    return [
+        *(_accepted(item) for item in used),
+        *(e for item in used for e in _run_evidence(item)),
+        *_trigger_events(state, trigger),
+    ]
+
+
+def _run_evidence(item: AcceptedHandoff) -> list[Proposed]:
+    """A reviewer's verdict or an automated UAT result, bound to the head the run saw."""
+    handoff = item.handoff
+    if handoff.commit_sha is None:
+        return []
+    if handoff.state.value == "uat":
+        return [
+            Proposed(
+                "evidence",
+                {
+                    "kind": "uat",
+                    "item": None,
+                    "head_sha": handoff.commit_sha,
+                    "passed": handoff.exit == "passed",
+                },
+            )
+        ]
+    if handoff.state.value == "in_review" and handoff.reviewer is not None:
+        return [
+            Proposed(
+                "evidence",
+                {
+                    "kind": "review",
+                    "item": handoff.reviewer,
+                    "head_sha": handoff.commit_sha,
+                    "passed": handoff.exit == "clean",
+                },
+            )
+        ]
+    return []
 
 
 def _accepted(item: AcceptedHandoff) -> Proposed:
@@ -141,11 +191,28 @@ def _from_commands(state: IssueState, commands: Sequence[ValidCommand]) -> list[
         passage = Proposed("gate_passage", _snapshot(item, state))
         if state.status is Status.BLOCKED and item.command.verb == "unblock":
             return [passage, *_unblock_events(item.command.arg.strip())]
+        if (state.status, item.command.verb, item.command.kind) in _APPROVALS:
+            if state.head_sha is None:
+                continue
+            return [passage, _approval_evidence(item, state.head_sha)]
         key = (state.status, state.issue_type, item.command.verb, item.command.kind)
         trigger = _GATES.get(key)
         if trigger is not None:
             return [passage, *_trigger_events(state, trigger)]
     return []
+
+
+def _approval_evidence(item: ValidCommand, head_sha: str) -> Proposed:
+    return Proposed(
+        "evidence",
+        {
+            "kind": "approval",
+            "item": item.command.kind,
+            "head_sha": head_sha,
+            "passed": True,
+            "actor_id": item.actor.user_id,
+        },
+    )
 
 
 def _snapshot(item: ValidCommand, state: IssueState) -> dict[str, Any]:
@@ -198,3 +265,21 @@ def _trigger_events(state: IssueState, trigger: Trigger | None) -> list[Proposed
         "transition", {"from": state.status.value, "to": target.value, "trigger": trigger.value}
     )
     return [*charge, move]
+
+
+# --- integration -----------------------------------------------------------------------------
+
+
+def plan_integration(state: IssueState, policy: GatePolicy, at_queue_head: bool) -> list[Proposed]:
+    """Move an issue from human_uat to integrating once every gate requirement holds on the
+    current head and the issue is first in the integration queue."""
+    if state.status is not Status.HUMAN_UAT or state.blocked_reason is not None:
+        return []
+    if state.head_sha is None or not at_queue_head:
+        return []
+    if not isinstance(evaluate_gate(state.head_sha, state.evidence, policy), Ready):
+        return []
+    trigger = (
+        Trigger.APPROVE_REVERT if state.issue_type is IssueType.REVERT else Trigger.APPROVE_UAT
+    )
+    return _trigger_events(state, trigger)

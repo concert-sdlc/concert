@@ -20,6 +20,7 @@ from concert.core.events import (
     parse_event,
     verify_chain,
 )
+from concert.core.evidence import Evidence
 from concert.core.transitions import (
     InvalidTransition,
     IssueType,
@@ -68,6 +69,7 @@ class IssueState:
     last_expiry_at: int | None = None
     note: str | None = None  # why a check blocked the issue
     branch_base: str | None = None  # the branch-creation commit recorded by the PM
+    evidence: tuple[Evidence, ...] = ()  # results and approvals, in order, each bound to a head
 
 
 class _Conflict(Exception):
@@ -205,6 +207,18 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         if data.get("commit_sha") is not None:
             state = replace(state, head_sha=str(data["commit_sha"]))
         return state
+    if kind == "evidence":
+        data = event.data
+        found = Evidence(
+            kind=str(data["kind"]),
+            item=None if data.get("item") is None else str(data["item"]),
+            head_sha=str(data["head_sha"]),
+            passed=bool(data["passed"]),
+            policy_rev=None if data.get("policy_rev") is None else str(data["policy_rev"]),
+            workflow_hash=None if data.get("workflow_hash") is None else str(data["workflow_hash"]),
+            actor_id=None if data.get("actor_id") is None else int(data["actor_id"]),
+        )
+        return replace(state, evidence=(*state.evidence, found))
     if kind == "gate_passage":
         data = event.data
         state = replace(

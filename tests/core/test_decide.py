@@ -1,15 +1,17 @@
 """decide(): derived state + accepted handoffs + valid commands -> the next events to post."""
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import Any
 
 from concert.core.commands import Actor, Command, Role
 from concert.core.counters import AgentState
-from concert.core.decide import AcceptedHandoff, Proposed, ValidCommand, decide
+from concert.core.decide import AcceptedHandoff, Proposed, ValidCommand, decide, plan_integration
 from concert.core.derive import IssueState, derive
 from concert.core.events import Event, append_event
+from concert.core.evidence import GatePolicy
 from concert.core.handoff import Accepted, parse_handoff
-from concert.core.transitions import Status, Trigger
+from concert.core.transitions import IssueType, Status, Trigger
 
 APPROVER = Actor(user_id=2, login="pat", is_bot=False, role=Role.APPROVER)
 ADMIN = Actor(user_id=1, login="alice", is_bot=False, role=Role.ADMIN)
@@ -184,10 +186,22 @@ def test_a_rejected_revert_goes_to_blocked_without_a_charge() -> None:
     assert state.counters.used(AgentState.IMPLEMENTING) == 0
 
 
-def test_an_approved_revert_goes_to_integrating() -> None:
+def test_a_revert_approval_is_evidence_not_a_transition() -> None:
     log = Log("revert").move("implementing", "human_uat", "ci_green")
-    proposals = decide(log.state(), [], [command(4, "approve", "revert", "abc1234", ADMIN)])
-    assert log.apply(proposals).state().status is Status.INTEGRATING
+    log.add(
+        "handoff_accepted",
+        {"run_id": "r-1", "state": "implementing", "commit_sha": "rev1", "artifact_rev": None},
+    )
+    proposals = decide(log.state(), [], [command(4, "approve", "revert", "rev1", ADMIN)])
+    assert kinds(proposals) == ["gate_passage", "evidence"]
+    assert proposals[1].data == {
+        "kind": "approval",
+        "item": "revert",
+        "head_sha": "rev1",
+        "passed": True,
+        "actor_id": ADMIN.user_id,
+    }
+    assert log.apply(proposals).state().status is Status.HUMAN_UAT
 
 
 def test_unblock_resets_the_target_counter_and_moves_to_the_target() -> None:
@@ -368,3 +382,207 @@ def test_approving_the_spec_records_the_hash_that_was_approved() -> None:
     proposals = decide(log.state(), [], [command(7, "approve", "spec", "spec1")])
     assert proposals[0].data["spec_hash"] == "spec1"
     assert log.apply(proposals).state().approved_spec_rev == "spec1"
+
+
+# --- evidence from handoffs and approvals ----------------------------------------------------------
+
+
+def head_handoff(
+    run_id: str, state: str, exit_name: str, sha: str, reviewer: str | None = None
+) -> AcceptedHandoff:
+    base = handoff(run_id, state, exit_name, reviewer=reviewer)
+    parsed = parse_handoff(
+        {
+            "schema": 1,
+            "state": state,
+            "run_id": run_id,
+            "runner": "vm-1",
+            "exit": exit_name,
+            "commit_sha": sha,
+            "artifact_rev": "spec1",
+            "reviewer": reviewer,
+        }
+    )
+    return AcceptedHandoff(parsed, base.decision, base.comment_id)
+
+
+def test_a_passed_uat_run_is_recorded_as_evidence_on_the_head_it_ran_against() -> None:
+    log = log_at("uat")
+    proposals = decide(log.state(), [head_handoff("r-5", "uat", "passed", "h1")], [])
+    assert kinds(proposals) == ["handoff_accepted", "evidence", "transition"]
+    assert proposals[1].data == {"kind": "uat", "item": None, "head_sha": "h1", "passed": True}
+    assert [(e.kind, e.passed) for e in log.apply(proposals).state().evidence] == [("uat", True)]
+
+
+def test_a_failed_uat_run_is_recorded_as_failing_evidence() -> None:
+    log = log_at("uat")
+    proposals = decide(log.state(), [head_handoff("r-5", "uat", "failed", "h1")], [])
+    assert kinds(proposals) == ["handoff_accepted", "evidence", "counter_charged", "transition"]
+    assert proposals[1].data["passed"] is False
+
+
+def test_each_reviewers_verdict_is_recorded_as_evidence() -> None:
+    log = log_at("in_review")
+    both = [
+        head_handoff("r-7", "in_review", "changes_needed", "h1", reviewer="code"),
+        head_handoff("r-8", "in_review", "clean", "h1", reviewer="security"),
+    ]
+    evidence = [p.data for p in decide(log.state(), both, []) if p.kind == "evidence"]
+    assert evidence == [
+        {"kind": "review", "item": "code", "head_sha": "h1", "passed": False},
+        {"kind": "review", "item": "security", "head_sha": "h1", "passed": True},
+    ]
+
+
+def test_human_uat_approvals_are_evidence_bound_to_the_head() -> None:
+    log = log_at("human_uat")
+    log.add(
+        "handoff_accepted",
+        {"run_id": "r-5", "state": "uat", "commit_sha": "h1", "artifact_rev": None},
+    )
+    for kind in ("uat", "security"):
+        proposals = decide(log.state(), [], [command(20, "approve", kind, "h1")])
+        assert kinds(proposals) == ["gate_passage", "evidence"]
+        assert proposals[1].data == {
+            "kind": "approval",
+            "item": kind,
+            "head_sha": "h1",
+            "passed": True,
+            "actor_id": APPROVER.user_id,
+        }
+
+
+# --- moving to integrating -------------------------------------------------------------------------
+
+HEAD = "h1"
+POLICY = GatePolicy(
+    policy_rev="p1",
+    dod_items=frozenset({"tests"}),
+    allowed_workflows=frozenset({"w1"}),
+    approvers=frozenset({APPROVER.user_id}),
+    admins=frozenset({ADMIN.user_id}),
+    security_sensitive=False,
+    protected_changed=False,
+    issue_type=IssueType.CODE,
+)
+
+
+def ready_log() -> Log:
+    log = log_at("human_uat")
+    log.add(
+        "handoff_accepted",
+        {"run_id": "r-5", "state": "uat", "commit_sha": HEAD, "artifact_rev": None},
+    )
+    for item in (
+        {
+            "kind": "ci",
+            "item": "tests",
+            "head_sha": HEAD,
+            "passed": True,
+            "policy_rev": "p1",
+            "workflow_hash": "w1",
+        },
+        {"kind": "review", "item": "code", "head_sha": HEAD, "passed": True},
+        {"kind": "review", "item": "security", "head_sha": HEAD, "passed": True},
+        {"kind": "uat", "item": None, "head_sha": HEAD, "passed": True},
+        {
+            "kind": "approval",
+            "item": "uat",
+            "head_sha": HEAD,
+            "passed": True,
+            "actor_id": APPROVER.user_id,
+        },
+    ):
+        log.add("evidence", item)
+    return log
+
+
+def test_a_ready_issue_at_the_head_of_the_queue_moves_to_integrating() -> None:
+    log = ready_log()
+    proposals = plan_integration(log.state(), POLICY, at_queue_head=True)
+    assert kinds(proposals) == ["transition"]
+    assert proposals[0].data["trigger"] == "approve_uat"
+    assert log.apply(proposals).state().status is Status.INTEGRATING
+
+
+def test_an_issue_waits_in_human_uat_until_it_reaches_the_head_of_the_queue() -> None:
+    assert plan_integration(ready_log().state(), POLICY, at_queue_head=False) == []
+
+
+def test_an_issue_whose_evidence_is_missing_or_stale_does_not_move() -> None:
+    log = ready_log()
+    log.add(
+        "evidence",
+        {
+            "kind": "ci",
+            "item": "tests",
+            "head_sha": HEAD,
+            "passed": False,
+            "policy_rev": "p1",
+            "workflow_hash": "w1",
+        },
+    )
+    assert plan_integration(log.state(), POLICY, at_queue_head=True) == []
+
+
+def test_a_new_head_makes_the_old_evidence_stale() -> None:
+    log = ready_log()
+    log.add(
+        "handoff_accepted",
+        {"run_id": "r-6", "state": "implementing", "commit_sha": "h2", "artifact_rev": None},
+    )
+    assert plan_integration(log.state(), POLICY, at_queue_head=True) == []
+
+
+def test_a_ready_revert_moves_to_integrating_on_the_revert_trigger() -> None:
+    log = Log("revert").move("implementing", "human_uat", "ci_green")
+    log.add(
+        "handoff_accepted",
+        {"run_id": "r-1", "state": "implementing", "commit_sha": "rev1", "artifact_rev": None},
+    )
+    log.add(
+        "evidence",
+        {
+            "kind": "ci",
+            "item": "tests",
+            "head_sha": "rev1",
+            "passed": True,
+            "policy_rev": "p1",
+            "workflow_hash": "w1",
+        },
+    )
+    log.add(
+        "evidence",
+        {
+            "kind": "approval",
+            "item": "revert",
+            "head_sha": "rev1",
+            "passed": True,
+            "actor_id": ADMIN.user_id,
+        },
+    )
+    policy = replace(POLICY, issue_type=IssueType.REVERT, require_reviews=False)
+    proposals = plan_integration(log.state(), policy, at_queue_head=True)
+    assert proposals[0].data["trigger"] == "approve_revert"
+    assert log.apply(proposals).state().status is Status.INTEGRATING
+
+
+def test_only_issues_in_human_uat_are_planned() -> None:
+    assert plan_integration(log_at("in_review").state(), POLICY, at_queue_head=True) == []
+
+
+def test_only_issues_in_human_uat_are_planned_even_with_a_ready_ledger() -> None:
+    log = ready_log()
+    log.add("transition", {"from": "human_uat", "to": "implementing", "trigger": "reject_uat"})
+    log.add(
+        "handoff_accepted",
+        {"run_id": "r-9", "state": "implementing", "commit_sha": HEAD, "artifact_rev": None},
+    )
+    assert log.state().status is Status.IMPLEMENTING
+    assert plan_integration(log.state(), POLICY, at_queue_head=True) == []
+
+
+def test_an_approval_before_any_head_exists_is_not_recorded() -> None:
+    log = log_at("human_uat")
+    assert log.state().head_sha is None
+    assert decide(log.state(), [], [command(20, "approve", "uat", "h1")]) == []
