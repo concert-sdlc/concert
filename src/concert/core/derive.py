@@ -291,6 +291,10 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         if data.get("commit_sha") is not None:
             state = replace(state, head_sha=str(data["commit_sha"]))
         return state
+    if kind == "issue_typed":
+        if state.status is not Status.INBOX:
+            raise _Conflict(f"conflict at seq {event.seq}: an issue is typed only in the inbox")
+        return replace(state, issue_type=IssueType(event.data["issue_type"]))
     if kind == "dependency_added":
         added = Dependency(int(event.data["issue"]), str(event.data["kind"]))
         kept = tuple(d for d in state.dependencies if d.issue != added.issue)

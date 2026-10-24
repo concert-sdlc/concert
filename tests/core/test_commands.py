@@ -237,3 +237,19 @@ def test_pm_status_is_for_any_trusted_human_and_other_pm_commands_for_admins() -
     assert isinstance(check("/pm status", OUTSIDER, state), Rejected)
     assert isinstance(check("/pm pause now", ADMIN, state), Valid)
     assert isinstance(check("/pm pause now", APPROVER, state), Rejected)
+
+
+def test_a_hotfixs_gate_commands_need_an_admin() -> None:
+    hotfix_uat = ctx(Status.HUMAN_UAT, IssueType.HOTFIX)
+    assert isinstance(check(f"/approve uat {HEAD_SHA}", ADMIN, hotfix_uat), Valid)
+    rejected = check(f"/approve uat {HEAD_SHA}", APPROVER, hotfix_uat)
+    assert isinstance(rejected, Rejected) and "admin" in rejected.reason
+    assert isinstance(check("/reject uat no", APPROVER, hotfix_uat), Rejected)
+    spec = ctx(Status.SPEC_APPROVAL, IssueType.HOTFIX)
+    assert isinstance(check(f"/approve spec {SPEC_HASH}", APPROVER, spec), Rejected)
+    assert isinstance(check(f"/approve spec {SPEC_HASH}", ADMIN, spec), Valid)
+
+
+def test_a_code_issues_gate_commands_stay_with_approvers() -> None:
+    code = ctx(Status.HUMAN_UAT)
+    assert isinstance(check(f"/approve uat {HEAD_SHA}", APPROVER, code), Valid)

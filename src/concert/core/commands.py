@@ -225,8 +225,11 @@ def validate_command(
     rule = _rule(command)
     if rule is None:
         return Rejected(f"unknown command /{command.verb} {command.kind or ''}".rstrip())
-    if actor.role < rule.role:
-        return Rejected(f"/{command.verb} needs the {rule.role.name.lower()} role")
+    needed = rule.role
+    if context.issue_type is IssueType.HOTFIX and command.verb in ("approve", "reject"):
+        needed = max(needed, Role.ADMIN)  # a hotfix skips the queue, so an admin decides on it
+    if actor.role < needed:
+        return Rejected(f"/{command.verb} needs the {needed.name.lower()} role")
     if rule.statuses is not None and context.status not in rule.statuses:
         return Rejected(
             f"/{command.verb} does not apply while the issue is in {context.status.value}"

@@ -10,7 +10,7 @@ protected-path approvals, merge preconditions) are not decided here yet.
 """
 
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from concert.core.commands import Actor, Command
@@ -317,6 +317,14 @@ def _from_commands(state: IssueState, commands: Sequence[ValidCommand]) -> list[
         passage = Proposed("gate_passage", _snapshot(item, state))
         if item.command.verb in ("depends-on", "drop-dependency"):
             return [passage, *_dependency_events(item)]
+        if (
+            state.status is Status.INBOX
+            and item.command.verb == "dispatch"
+            and item.command.kind == "hotfix"
+        ):  # an admin's hotfix: the type changes first, then the normal dispatch
+            typed = Proposed("issue_typed", {"issue_type": IssueType.HOTFIX.value})
+            hotfix = replace(state, issue_type=IssueType.HOTFIX)
+            return [passage, typed, *_trigger_events(hotfix, Trigger.DISPATCH)]
         if state.status is Status.BLOCKED and item.command.verb == "unblock":
             return [passage, *_unblock_events(item.command.arg.strip())]
         if (state.status, item.command.verb, item.command.kind) in _APPROVALS:

@@ -9,9 +9,9 @@ from tests.runner.helpers import ALICE, MALLORY, World, spec_files
 REVIEWERS = ("code", "security")
 
 
-def to_spec_approval(world: World, issue: int) -> tuple[str, str]:
+def to_spec_approval(world: World, issue: int, dispatch: str = "/dispatch") -> tuple[str, str]:
     """dispatch -> triage -> spec -> spec_approval. Returns (spec_commit, spec_hash)."""
-    world.say(ALICE, issue, "/dispatch")
+    world.say(ALICE, issue, dispatch)
     world.poll(issue)
     run = world.assign(issue, head=None)
     world.handoff(issue, run, "triage", "spec")
@@ -34,8 +34,8 @@ def to_spec_approval(world: World, issue: int) -> tuple[str, str]:
     return sha, spec_hash
 
 
-def to_implementing(world: World, issue: int) -> tuple[str, str]:
-    sha, spec_hash = to_spec_approval(world, issue)
+def to_implementing(world: World, issue: int, dispatch: str = "/dispatch") -> tuple[str, str]:
+    sha, spec_hash = to_spec_approval(world, issue, dispatch)
     world.say(ALICE, issue, f"/approve spec {spec_hash}")
     assert world.poll(issue).status is Status.IMPLEMENTING
     return sha, spec_hash

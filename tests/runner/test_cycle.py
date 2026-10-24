@@ -117,3 +117,35 @@ def test_a_dependent_issue_integrates_in_the_cycle_after_its_prerequisite_lands(
         known=landed,
     )
     assert freed.head == second and freed.states[second].status is Status.INTEGRATING
+
+
+def test_a_hotfix_jumps_the_queue_and_passes_a_frozen_queue() -> None:
+    from concert.core.commands import Role
+
+    world = World()
+    world.config = (
+        replace(
+            world.config,
+            gate_policy=POLICY,
+            roles={ALICE.user_id: Role.ADMIN},
+            gate_policy_admins=None,
+        )
+        if False
+        else replace(
+            world.config,
+            gate_policy=replace(POLICY, admins=frozenset({ALICE.user_id})),
+            roles={ALICE.user_id: Role.ADMIN},
+        )
+    )
+    normal, urgent = world.new_issue(), world.new_issue()
+    heads = {
+        normal: to_human_uat(world, normal),
+        urgent: to_human_uat(world, urgent, "/dispatch hotfix"),
+    }
+    assert world.state(urgent).issue_type.value == "hotfix"
+    for issue, head in heads.items():
+        world.fake.add_check_run(head, "tests", "success", "w1")
+        world.say(ALICE, issue, f"/approve uat {head}")
+    result = cycle(world, normal, urgent)
+    assert result.head == urgent  # dispatched later, but it jumps the queue
+    assert world.state(normal).status is Status.HUMAN_UAT

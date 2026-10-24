@@ -675,3 +675,12 @@ def test_a_deferred_run_frees_the_slot_for_a_later_attempt() -> None:
     journey.add("run_deferred", {"run_id": "r-1"})
     state = derive(journey.raw())
     assert state.settled_runs == frozenset() and state.status is Status.TRIAGE
+
+
+def test_typing_an_issue_is_only_allowed_while_it_is_in_the_inbox() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("issue_typed", {"issue_type": "hotfix"})
+    assert derive(journey.raw()).issue_type is IssueType.HOTFIX
+    journey.move("inbox", "triage", "dispatch")
+    journey.add("issue_typed", {"issue_type": "code"})
+    assert derive(journey.raw()).status is Status.BLOCKED

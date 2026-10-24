@@ -20,9 +20,9 @@ POLICY = GatePolicy(
 )
 
 
-def to_human_uat(world: World, issue: int) -> str:
+def to_human_uat(world: World, issue: int, dispatch: str = "/dispatch") -> str:
     """Implementation -> reviews -> automated UAT. Returns the head the issue sits at."""
-    _sha, spec_hash = to_implementing(world, issue)
+    _sha, spec_hash = to_implementing(world, issue, dispatch)
     run = world.assign(issue, head=world.pm.get_ref(f"pm/{issue}"))
     head = world.wip_commit(issue, run, {"backend/export.py": "def export(): ..."})
     world.handoff(

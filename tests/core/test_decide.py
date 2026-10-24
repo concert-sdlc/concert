@@ -1051,3 +1051,21 @@ def test_an_agent_entry_with_an_unknown_kind_is_ignored() -> None:
     log.move("inbox", "triage", "dispatch")
     item = handoff_with("triage", "spec", [{"issue": 7, "kind": "sometime"}])
     assert "dependency_added" not in kinds(decide(log.state(), [item], []))
+
+
+# --- hotfix dispatch -----------------------------------------------------------------------------
+
+
+def test_an_admins_hotfix_dispatch_types_the_issue_and_starts_triage() -> None:
+    log = log_at("inbox")
+    proposals = decide(log.state(), [], [command(5, "dispatch", "hotfix", actor=ADMIN)])
+    assert kinds(proposals) == ["gate_passage", "issue_typed", "transition"]
+    assert dict(proposals[1].data) == {"issue_type": "hotfix"}
+    state = log.apply(proposals).state()
+    assert state.issue_type is IssueType.HOTFIX and state.status is Status.TRIAGE
+
+
+def test_a_plain_dispatch_leaves_the_type_alone() -> None:
+    log = log_at("inbox")
+    proposals = decide(log.state(), [], [command(5, "dispatch")])
+    assert kinds(proposals) == ["gate_passage", "transition"]
