@@ -15,7 +15,14 @@ from typing import Protocol
 
 from concert.core.assign import Heartbeat, RunnerInfo, expire_leases, plan_assignments
 from concert.core.ci import plan_ci_evidence, plan_review_evidence
-from concert.core.commands import IssueContext, Role, Valid, parse_command, validate_command
+from concert.core.commands import (
+    Command,
+    IssueContext,
+    Role,
+    Valid,
+    parse_command,
+    validate_command,
+)
 from concert.core.commit_binding import ForeignCommits, check_commit_binding
 from concert.core.decide import (
     AcceptedHandoff,
@@ -27,6 +34,12 @@ from concert.core.decide import (
     plan_merged,
     plan_revert_ci,
     plan_verify_failure,
+)
+from concert.core.dependencies import (
+    START,
+    dependency_problem,
+    parse_dependency_arg,
+    unmet,
 )
 from concert.core.derive import IssueState, derive
 from concert.core.effects import Effect, plan_effect
@@ -53,7 +66,7 @@ from concert.core.kits import (
 )
 from concert.core.paths import WORKFLOW_PATHS, changed_paths, matches_any
 from concert.core.transitions import IssueType, Status, Trigger, is_terminal
-from concert.github.api import Comment, Conflict, GitHubApi, Identity
+from concert.github.api import Comment, Conflict, GitHubApi, Identity, NotFound
 from concert.github.comments import (
     EventRecord,
     HandoffComment,
@@ -103,6 +116,7 @@ class PollResult:
     status_reverted: bool = False
     state: IssueState = field(default_factory=IssueState)
     ready_for_integration: bool = False  # in human_uat with every merge requirement met
+    waiting_on: tuple[int, ...] = ()  # issues whose unfinished work is holding this one back
 
 
 def poll_issue(
@@ -114,8 +128,10 @@ def poll_issue(
     now: int = 0,
     load: Mapping[str, int] | None = None,
     at_queue_head: bool = True,
+    others: Mapping[int, IssueState] | None = None,
 ) -> PollResult:
-    return _Poll(github, mirror, issue, config, facts, now, load, at_queue_head).run()
+    """`others`: what is known of the other issues (their derived state), for dependencies."""
+    return _Poll(github, mirror, issue, config, facts, now, load, at_queue_head, others or {}).run()
 
 
 class _Poll:
@@ -129,8 +145,11 @@ class _Poll:
         now: int,
         load: Mapping[str, int] | None,
         at_queue_head: bool,
+        others: Mapping[int, IssueState],
     ) -> None:
         self.at_queue_head = at_queue_head
+        self.others = others
+        self._known: dict[int, bool] = {}
         self.github = github
         self.mirror = mirror
         self.issue = issue
@@ -189,10 +208,12 @@ class _Poll:
         self._admin_reviews()
         self._revert_ci()
         self._effects()
-        self._integrate()
+        if not self._unmet_for_integration():
+            self._integrate()
         self._after_merge()
         self._after_verify()
-        self._runs()
+        if not self._unmet_to_start():
+            self._runs()
         return self._finish()
 
     # --- steps -----------------------------------------------------------------------------------
@@ -326,7 +347,12 @@ class _Poll:
 
         valid = self._valid_commands(all_comments)
         proposals = decide(
-            state, accepted, valid, self.config.verify_reruns, self._answers(all_comments)
+            state,
+            accepted,
+            valid,
+            self.config.verify_reruns,
+            self._answers(all_comments),
+            self._problem_with,
         )
         if proposals:
             self._post(proposals)
@@ -408,14 +434,16 @@ class _Poll:
             adoption_report_hash=None,
             workflow_diff_hash=None,
             unblock_targets=unblock_targets(state),
-            existing_issues=frozenset({self.issue}),
+            existing_issues=self._existing_issues(comments),
         )
         valid: list[ValidCommand] = []
         for command in extract_commands(comments, self.config.roles):
             if command.comment_id in state.consumed_commands:
                 continue
             verdict = validate_command(command.command, command.actor, command.facts, context)
-            if isinstance(verdict, Valid):
+            if isinstance(verdict, Valid) and (reason := self._dependency_refusal(command.command)):
+                self.rejected.append(f"comment {command.comment_id}: {reason}")
+            elif isinstance(verdict, Valid):
                 valid.append(
                     ValidCommand(
                         command.comment_id,
@@ -428,6 +456,61 @@ class _Poll:
             else:
                 self.rejected.append(f"comment {command.comment_id}: {verdict.reason}")
         return valid
+
+    # --- dependencies ------------------------------------------------------------------------------
+
+    def _exists(self, number: int) -> bool:
+        if number == self.issue or number in self.others:
+            return True
+        if number not in self._known:
+            try:
+                self.github.get_issue(number)
+                self._known[number] = True
+            except NotFound:
+                self._known[number] = False
+        return self._known[number]
+
+    def _existing_issues(self, comments: Sequence[Comment]) -> frozenset[int]:
+        """The issues a command may name: this one, the ones we know, and any it points at that
+        exist on GitHub."""
+        named: set[int] = set()
+        for comment in comments:
+            command = parse_command(comment.body)
+            if command is not None and command.verb in ("depends-on", "drop-dependency"):
+                parsed = parse_dependency_arg(command.arg)
+                if parsed is not None and self._exists(parsed[0]):
+                    named.add(parsed[0])
+        return frozenset({self.issue, *self.others, *named})
+
+    def _graph(self) -> dict[int, frozenset[int]]:
+        return {n: frozenset(d.issue for d in s.dependencies) for n, s in self.others.items()}
+
+    def _problem_with(self, target: int) -> str | None:
+        return dependency_problem(
+            self.issue, target, self.state.status, self._graph(), self._exists(target)
+        )
+
+    def _dependency_refusal(self, command: Command) -> str | None:
+        if command.verb != "depends-on":
+            return None
+        parsed = parse_dependency_arg(command.arg)
+        return (
+            self._problem_with(parsed[0]) if parsed else "name an issue as #N, then merge or start"
+        )
+
+    def _statuses(self) -> dict[int, Status]:
+        return {n: s.status for n, s in self.others.items()}
+
+    def _unmet_to_start(self) -> list[int]:
+        """Start-dependencies still unmet. They hold back runs and queue entry, except while the
+        spec is being written and approved: a wait never blocks an issue's own spec kit."""
+        if self.state.status in (Status.SPEC, Status.SPEC_APPROVAL):
+            return []
+        return [d.issue for d in unmet(self.state.dependencies, self._statuses(), START)]
+
+    def _unmet_for_integration(self) -> list[int]:
+        """Every dependency of either kind must be on staging before the queue head."""
+        return [d.issue for d in unmet(self.state.dependencies, self._statuses(), None)]
 
     def _effects(self) -> None:
         """Perform the side effects the state calls for: announce, act, record the outcome.
@@ -766,7 +849,18 @@ class _Poll:
             state=state,
             ready_for_integration=state.status is Status.HUMAN_UAT
             and state.blocked_reason is None
+            and not self._unmet_for_integration()
             and self._gate_ready(),
+            waiting_on=tuple(
+                sorted(
+                    set(self._unmet_to_start())
+                    | (
+                        set(self._unmet_for_integration())
+                        if state.status is Status.HUMAN_UAT
+                        else set()
+                    )
+                )
+            ),
         )
 
 

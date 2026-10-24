@@ -327,7 +327,7 @@ def test_a_handoff_that_leaves_the_state_unchanged_is_still_accepted_only_once()
     log = Log().move("inbox", "triage", "dispatch")
     waiting = handoff("r-3", "triage", "blocked_by")  # waits on a dependency: no transition
     first = decide(log.state(), [waiting], [])
-    assert kinds(first) == ["handoff_accepted"]
+    assert kinds(first) == ["handoff_accepted", "run_deferred"]
     log.apply(first)
     assert decide(log.state(), [waiting], []) == []
 
@@ -348,7 +348,7 @@ def test_needs_prerequisite_wins_over_findings_and_nothing_is_charged() -> None:
         handoff("r-8", "in_review", "changes_needed", reviewer="security"),
     ]
     proposals = decide(log.state(), both, [])
-    assert kinds(proposals) == ["handoff_accepted", "handoff_accepted"]
+    assert kinds(proposals) == ["handoff_accepted", "handoff_accepted", "run_deferred"]
     assert log.apply(proposals).state().counters.used(AgentState.IMPLEMENTING) == 0
 
 
@@ -923,3 +923,131 @@ def test_an_exhausted_budget_blocks_with_the_cause_in_the_note() -> None:
     assert move.data["to"] == "blocked" and move.data["trigger"] == "budget_exceeded"
     assert "retry budget" in str(move.data["note"]) and "changes_needed" in str(move.data["note"])
     assert log.apply(proposals).state().note == move.data["note"]
+
+
+# --- dependencies ---------------------------------------------------------------------------------
+
+
+def test_depends_on_adds_a_dependency_of_the_given_kind() -> None:
+    log = log_at("inbox")
+    log.move("inbox", "triage", "dispatch")
+    proposals = decide(log.state(), [], [command(9, "depends-on", None, "#5 merge")])
+    assert kinds(proposals) == ["gate_passage", "dependency_added"]
+    assert dict(proposals[1].data) == {"issue": 5, "kind": "merge", "source": "command"}
+    from concert.core.dependencies import Dependency
+
+    assert log.apply(proposals).state().dependencies == (Dependency(5, "merge"),)
+
+
+def test_the_default_kind_is_start() -> None:
+    log = log_at("inbox")
+    proposals = decide(log.state(), [], [command(9, "depends-on", None, "#5")])
+    assert proposals[1].data["kind"] == "start"
+
+
+def test_drop_dependency_removes_it() -> None:
+    log = log_at("inbox")
+    log.add("dependency_added", {"issue": 5, "kind": "start", "source": "command"})
+    proposals = decide(log.state(), [], [command(9, "drop-dependency", None, "#5")])
+    assert kinds(proposals) == ["gate_passage", "dependency_dropped"]
+    assert log.apply(proposals).state().dependencies == ()
+
+
+def test_a_malformed_dependency_command_is_consumed_without_effect() -> None:
+    log = log_at("inbox")
+    proposals = decide(log.state(), [], [command(9, "depends-on", None, "#x")])
+    assert kinds(proposals) == ["gate_passage"]
+
+
+def handoff_with(
+    state: str, exit_name: str, depends_on: list[dict[str, object]]
+) -> AcceptedHandoff:
+    base = handoff("r-4", state, exit_name)
+    parsed = parse_handoff(
+        {
+            "schema": 1,
+            "state": state,
+            "run_id": "r-4",
+            "runner": "vm-1",
+            "exit": exit_name,
+            "commit_sha": None,
+            "artifact_rev": None,
+            "depends_on": depends_on,
+        }
+    )
+    return AcceptedHandoff(parsed, base.decision, base.comment_id)
+
+
+def test_an_agent_may_declare_dependencies_for_its_own_issue() -> None:
+    log = log_at("inbox")
+    log.move("inbox", "triage", "dispatch")
+    item = handoff_with("triage", "spec", [{"issue": 7, "kind": "merge", "reason": "order"}])
+    proposals = decide(log.state(), [item], [])
+    assert kinds(proposals) == ["handoff_accepted", "dependency_added", "transition"]
+    assert dict(proposals[1].data) == {"issue": 7, "kind": "merge", "source": "agent"}
+
+
+def test_agent_entries_that_are_malformed_or_checked_out_are_ignored() -> None:
+    log = log_at("inbox")
+    log.move("inbox", "triage", "dispatch")
+    entries: list[dict[str, object]] = [
+        {"issue": "x"},
+        {"kind": "start"},
+        {"issue": 8},
+        {"issue": 9},
+    ]
+    proposals = decide(
+        log.state(),
+        [handoff_with("triage", "spec", entries)],
+        [],
+        dependency_problem=lambda n: "no such issue" if n == 8 else None,
+    )
+    added = [dict(p.data) for p in proposals if p.kind == "dependency_added"]
+    assert added == [{"issue": 9, "kind": "start", "source": "agent"}]
+
+
+def test_blocked_by_waits_in_triage_without_leaving_it() -> None:
+    log = log_at("inbox")
+    log.move("inbox", "triage", "dispatch")
+    item = handoff_with("triage", "blocked_by", [{"issue": 7, "kind": "start"}])
+    proposals = decide(log.state(), [item], [])
+    assert kinds(proposals) == ["handoff_accepted", "dependency_added", "run_deferred"]
+    state = log.apply(proposals).state()
+    assert state.status is Status.TRIAGE and state.settled_runs == frozenset()
+    assert state.counters.used(AgentState.SPEC) == 0
+
+
+def test_needs_prerequisite_defers_the_run_without_a_charge() -> None:
+    log = log_at("implementing")
+    item = handoff_with("implementing", "needs_prerequisite", [{"issue": 7, "kind": "start"}])
+    base = AcceptedHandoff(item.handoff, Accepted(trigger=None), item.comment_id)
+    proposals = decide(log.state(), [base], [])
+    assert kinds(proposals) == ["handoff_accepted", "dependency_added", "run_deferred"]
+    assert log.apply(proposals).state().status is Status.IMPLEMENTING
+
+
+def test_endless_deferrals_end_in_a_block() -> None:
+    log = log_at("implementing")
+    for _ in range(3):
+        log.add("run_deferred", {"run_id": "r"})
+    item = handoff_with("implementing", "needs_prerequisite", [{"issue": 7, "kind": "start"}])
+    base = AcceptedHandoff(item.handoff, Accepted(trigger=None), item.comment_id)
+    proposals = decide(log.state(), [base], [])
+    assert proposals[-1].data["to"] == "blocked" and "waited" in str(proposals[-1].data["note"])
+
+
+def test_an_agent_does_not_re_declare_a_dependency_the_issue_already_has() -> None:
+    log = log_at("inbox")
+    log.move("inbox", "triage", "dispatch")
+    log.add("dependency_added", {"issue": 7, "kind": "merge", "source": "command"})
+    item = handoff_with("triage", "spec", [{"issue": 7, "kind": "start"}])
+    proposals = decide(log.state(), [item], [])
+    assert "dependency_added" not in kinds(proposals)  # a human's choice is not overwritten
+    assert log.apply(proposals).state().dependencies[0].kind == "merge"
+
+
+def test_an_agent_entry_with_an_unknown_kind_is_ignored() -> None:
+    log = log_at("inbox")
+    log.move("inbox", "triage", "dispatch")
+    item = handoff_with("triage", "spec", [{"issue": 7, "kind": "sometime"}])
+    assert "dependency_added" not in kinds(decide(log.state(), [item], []))

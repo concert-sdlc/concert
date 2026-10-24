@@ -12,6 +12,7 @@ from types import MappingProxyType
 from typing import Any
 
 from concert.core.counters import AgentState, Cause, Outcome, RetryCounters, charge_target
+from concert.core.dependencies import Dependency
 from concert.core.events import (
     ChainError,
     Event,
@@ -99,6 +100,8 @@ class IssueState:
     question_comment_id: int | None = None  # the PM's question comment, answers come after it
     questions_posted: frozenset[str] = frozenset()
     answers: tuple[str, ...] = ()  # trusted humans' answers, oldest first
+    dependencies: tuple[Dependency, ...] = ()  # what this issue waits on, oldest first
+    deferrals: int = 0  # runs deferred behind a dependency since the issue entered this state
     close_noted: bool = False  # the issue was closed after its work merged; noted once
     dispatched_at: int = 0  # when the latest /dispatch was posted
     froze_queue: bool = False  # a failed staging verification froze the queue; cleared on unblock
@@ -148,6 +151,7 @@ def _fresh_state_bookkeeping(state: IssueState) -> IssueState:
         settled_reviewers=frozenset(),
         verify_failures=0,
         verify_failed=False,
+        deferrals=0,
         infra_attempts=MappingProxyType({}),
         last_expiry_at=None,
     )
@@ -287,6 +291,22 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         if data.get("commit_sha") is not None:
             state = replace(state, head_sha=str(data["commit_sha"]))
         return state
+    if kind == "dependency_added":
+        added = Dependency(int(event.data["issue"]), str(event.data["kind"]))
+        kept = tuple(d for d in state.dependencies if d.issue != added.issue)
+        return replace(state, dependencies=(*kept, added))
+    if kind == "dependency_dropped":
+        dropped = int(event.data["issue"])
+        return replace(
+            state, dependencies=tuple(d for d in state.dependencies if d.issue != dropped)
+        )
+    if kind == "run_deferred":
+        return replace(
+            state,
+            settled_runs=frozenset(),
+            settled_reviewers=frozenset(),
+            deferrals=state.deferrals + 1,
+        )
     if kind == "closed_after_merge":
         return replace(state, close_noted=True)
     if kind == "verify_rerun":

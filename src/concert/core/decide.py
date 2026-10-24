@@ -9,12 +9,13 @@ Gates that need more evidence than a command (`approve uat`, `approve security`,
 protected-path approvals, merge preconditions) are not decided here yet.
 """
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from concert.core.commands import Actor, Command
 from concert.core.counters import AgentState, Cause, Outcome, charge_target
+from concert.core.dependencies import parse_dependency_arg
 from concert.core.derive import IssueState
 from concert.core.evidence import GatePolicy, Ready, evaluate_gate
 from concert.core.handoff import Accepted, Handoff, consolidate_reviews
@@ -24,6 +25,15 @@ if TYPE_CHECKING:  # ci imports Proposed from here
     from concert.core.ci import CheckRun
 
 REVIEWERS = frozenset({"code", "security"})
+
+# An agent may defer its run behind a prerequisite only so often per state: waiting never charges
+# a re-entry, so this is what guarantees that runs end.
+MAX_DEFERRALS = 3
+_DEFERRING_EXITS = frozenset({"blocked_by", "needs_prerequisite"})
+
+
+def _no_problem(_issue: int) -> str | None:
+    return None
 
 
 @dataclass(frozen=True)
@@ -101,10 +111,12 @@ def decide(
     commands: Sequence[ValidCommand],
     verify_reruns: int = 1,
     answers: Sequence[Answer] = (),
+    dependency_problem: Callable[[int], str | None] = _no_problem,
 ) -> list[Proposed]:
+    """`dependency_problem(n)`: why this issue may not wait on #n (the caller knows the board)."""
     if state.blocked_reason is not None or is_terminal(state.status):
         return []
-    from_handoffs = _from_handoffs(state, handoffs, verify_reruns)
+    from_handoffs = _from_handoffs(state, handoffs, verify_reruns, dependency_problem)
     if from_handoffs:
         return from_handoffs
     if state.status is Status.NEEDS_INPUT:
@@ -129,7 +141,10 @@ def _from_answers(state: IssueState, answers: Sequence[Answer]) -> list[Proposed
 
 
 def _from_handoffs(
-    state: IssueState, handoffs: Sequence[AcceptedHandoff], verify_reruns: int
+    state: IssueState,
+    handoffs: Sequence[AcceptedHandoff],
+    verify_reruns: int,
+    problem: Callable[[int], str | None],
 ) -> list[Proposed]:
     pending = sorted(
         (
@@ -143,8 +158,10 @@ def _from_handoffs(
     if not pending:
         return []
     if state.status is Status.IN_REVIEW:
-        return _review_round(state, pending)
+        return _review_round(state, pending, problem)
     first = pending[0]
+    if first.handoff.exit in _DEFERRING_EXITS:
+        return _deferral(state, [first], problem)
     if (
         state.status is Status.VERIFYING_STAGING
         and state.revert_merge_sha is not None
@@ -161,12 +178,59 @@ def _from_handoffs(
         return [_accepted(first)]  # the issue moves on once the PM has merged
     return [
         _accepted(first),
+        *_agent_dependencies(state, first, problem),
         *_run_evidence(first),
         *_trigger_events(state, first.decision.trigger),
     ]
 
 
-def _review_round(state: IssueState, pending: Sequence[AcceptedHandoff]) -> list[Proposed]:
+def _agent_dependencies(
+    state: IssueState, item: AcceptedHandoff, problem: Callable[[int], str | None]
+) -> list[Proposed]:
+    """Dependencies an agent declares in its handoff, for its own issue only. They only add
+    waiting; malformed entries and ones the board refuses (a cycle, no such issue) are ignored."""
+    found: list[Proposed] = []
+    for entry in item.handoff.depends_on:
+        target, kind = entry.get("issue"), entry.get("kind", "start")
+        if (
+            not isinstance(target, int)
+            or isinstance(target, bool)
+            or kind not in ("start", "merge")
+        ):
+            continue
+        if problem(target) is not None or any(d.issue == target for d in state.dependencies):
+            continue
+        found.append(
+            Proposed("dependency_added", {"issue": target, "kind": kind, "source": "agent"})
+        )
+    return found
+
+
+def _deferral(
+    state: IssueState, used: Sequence[AcceptedHandoff], problem: Callable[[int], str | None]
+) -> list[Proposed]:
+    """The run could not finish for want of a prerequisite: record what it names, free the slot
+    and wait. Never a charge; too many deferrals in one state end in a block instead."""
+    accepted = [_accepted(item) for item in used]
+    if state.deferrals >= MAX_DEFERRALS:
+        note = f"waited on prerequisites {state.deferrals} times without the work being able to proceed"
+        block = Proposed(
+            "transition",
+            {
+                "from": state.status.value,
+                "to": Status.BLOCKED.value,
+                "trigger": Trigger.CHECK_FAILED.value,
+                "note": note,
+            },
+        )
+        return [*accepted, block]
+    declared = [d for item in used for d in _agent_dependencies(state, item, problem)]
+    return [*accepted, *declared, Proposed("run_deferred", {"run_id": used[0].handoff.run_id})]
+
+
+def _review_round(
+    state: IssueState, pending: Sequence[AcceptedHandoff], problem: Callable[[int], str | None]
+) -> list[Proposed]:
     """Reviewers run in parallel at one head; the round settles once, when all have reported."""
     by_reviewer: dict[str, AcceptedHandoff] = {}
     for item in pending:
@@ -176,6 +240,8 @@ def _review_round(state: IssueState, pending: Sequence[AcceptedHandoff]) -> list
         return []
     used = [by_reviewer[name] for name in sorted(REVIEWERS)]
     outcome = consolidate_reviews([item.handoff.exit for item in used])
+    if outcome == "needs_prerequisite":
+        return _deferral(state, used, problem)
     trigger = {"clean": Trigger.CLEAN, "changes_needed": Trigger.CHANGES_NEEDED}.get(outcome)
     return [
         *(_accepted(item) for item in used),
@@ -234,11 +300,23 @@ def _accepted(item: AcceptedHandoff) -> Proposed:
 # --- commands --------------------------------------------------------------------------------
 
 
+def _dependency_events(item: ValidCommand) -> list[Proposed]:
+    parsed = parse_dependency_arg(item.command.arg)
+    if parsed is None:
+        return []
+    target, kind = parsed
+    if item.command.verb == "drop-dependency":
+        return [Proposed("dependency_dropped", {"issue": target})]
+    return [Proposed("dependency_added", {"issue": target, "kind": kind, "source": "command"})]
+
+
 def _from_commands(state: IssueState, commands: Sequence[ValidCommand]) -> list[Proposed]:
     for item in sorted(commands, key=lambda c: c.comment_id):
         if item.comment_id in state.consumed_commands:
             continue
         passage = Proposed("gate_passage", _snapshot(item, state))
+        if item.command.verb in ("depends-on", "drop-dependency"):
+            return [passage, *_dependency_events(item)]
         if state.status is Status.BLOCKED and item.command.verb == "unblock":
             return [passage, *_unblock_events(item.command.arg.strip())]
         if (state.status, item.command.verb, item.command.kind) in _APPROVALS:

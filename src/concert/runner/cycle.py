@@ -9,6 +9,7 @@ or verified, and while a failed verification has frozen it; reverts and hotfixes
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from concert.core.derive import IssueState
 from concert.core.queue import QueueEntry, pick_queue_head
 from concert.core.transitions import Status
 from concert.github.api import GitHubApi
@@ -23,6 +24,11 @@ class CycleResult:
     results: Mapping[int, PollResult]
     head: int | None  # the issue allowed to integrate in this cycle
 
+    @property
+    def states(self) -> dict[int, IssueState]:
+        """Pass these as `known` to the next cycle."""
+        return {n: r.state for n, r in self.results.items()}
+
 
 def run_cycle(
     github: GitHubApi,
@@ -31,10 +37,16 @@ def run_cycle(
     config: RunnerConfig,
     facts: FactsProvider,
     now: int = 0,
+    known: Mapping[int, IssueState] | None = None,
 ) -> CycleResult:
-    results = {
-        n: poll_issue(github, mirror, n, config, facts, now, at_queue_head=False) for n in issues
-    }
+    """`known`: the states seen in the previous cycle, so an issue can tell whether the issues
+    it waits on have landed (an issue not seen yet counts as unfinished)."""
+    results: dict[int, PollResult] = {}
+    for n in issues:
+        others = {**(known or {}), **{m: r.state for m, r in results.items()}}
+        results[n] = poll_issue(
+            github, mirror, n, config, facts, now, at_queue_head=False, others=others
+        )
     states = {n: r.state for n, r in results.items()}
     busy = any(s.status in _HOLDING for s in states.values())
     frozen = any(s.froze_queue and s.status is Status.BLOCKED for s in states.values())
@@ -46,10 +58,11 @@ def run_cycle(
     chosen = pick_queue_head(waiting, busy=busy, frozen=frozen)
     if chosen is None:
         return CycleResult(results, None)
+    others = {**(known or {}), **states}
     results = {
         **results,
         chosen.number: poll_issue(
-            github, mirror, chosen.number, config, facts, now, at_queue_head=True
+            github, mirror, chosen.number, config, facts, now, at_queue_head=True, others=others
         ),
     }
     return CycleResult(results, chosen.number)

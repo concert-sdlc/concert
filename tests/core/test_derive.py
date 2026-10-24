@@ -645,3 +645,33 @@ def test_decisions_are_kept_and_a_close_outcome_is_remembered() -> None:
     journey.add("outcome", {"key": "close_duplicate", "result": {"closed": True}})
     state = derive(journey.raw())
     assert state.closed_posted == frozenset({"close_duplicate"}) and state.pending_intents == ()
+
+
+# --- dependencies --------------------------------------------------------------------------------
+
+
+def test_dependencies_are_added_replaced_and_dropped() -> None:
+    from concert.core.dependencies import Dependency
+
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("dependency_added", {"issue": 5, "kind": "start", "source": "command"})
+    journey.add("dependency_added", {"issue": 6, "kind": "merge", "source": "agent"})
+    assert derive(journey.raw()).dependencies == (Dependency(5, "start"), Dependency(6, "merge"))
+    journey.add("dependency_added", {"issue": 5, "kind": "merge", "source": "command"})
+    assert derive(journey.raw()).dependencies == (Dependency(6, "merge"), Dependency(5, "merge"))
+    journey.add("dependency_dropped", {"issue": 6})
+    assert derive(journey.raw()).dependencies == (Dependency(5, "merge"),)
+    journey.add("dependency_dropped", {"issue": 99})  # dropping an unknown one changes nothing
+    assert derive(journey.raw()).dependencies == (Dependency(5, "merge"),)
+
+
+def test_a_deferred_run_frees_the_slot_for_a_later_attempt() -> None:
+    journey = Journey().add("created", {"issue_type": "code"}).move("inbox", "triage", "dispatch")
+    journey.add(
+        "handoff_accepted",
+        {"run_id": "r-1", "state": "triage", "commit_sha": None, "artifact_rev": None},
+    )
+    assert derive(journey.raw()).settled_runs == frozenset({"r-1"})
+    journey.add("run_deferred", {"run_id": "r-1"})
+    state = derive(journey.raw())
+    assert state.settled_runs == frozenset() and state.status is Status.TRIAGE

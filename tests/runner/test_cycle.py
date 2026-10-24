@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 
+from concert.core.derive import IssueState
 from concert.core.transitions import Status
 from concert.runner.cycle import run_cycle
 from tests.runner.helpers import ALICE, World
@@ -83,3 +84,36 @@ def test_a_frozen_queue_holds_the_next_issue() -> None:
     assert world.state(first).status is Status.BLOCKED
     assert cycle(world, first, second).head is None
     assert world.state(second).status is Status.HUMAN_UAT
+
+
+def test_a_dependent_issue_integrates_in_the_cycle_after_its_prerequisite_lands() -> None:
+    world, first, second, _h1, _h2 = two_ready_issues()
+    world.fake.tick(1)
+    dependent = run_cycle(
+        world.pm, world.mirror, [first, second], world.config, world.facts, now=world.fake.now
+    )
+    assert dependent.head == first  # sanity: the earlier issue goes first
+    world.say(ALICE, second, f"/depends-on #{first} merge")
+    cycle(world, second)  # records the dependency (one command per poll)
+    known = {first: world.state(first)}
+    held = run_cycle(
+        world.pm,
+        world.mirror,
+        [second],
+        world.config,
+        world.facts,
+        now=world.fake.now + 5,
+        known=known,
+    )
+    assert held.head is None and world.state(second).status is Status.HUMAN_UAT
+    landed = {first: IssueState(status=Status.ON_STAGING)}
+    freed = run_cycle(
+        world.pm,
+        world.mirror,
+        [second],
+        world.config,
+        world.facts,
+        now=world.fake.now + 9,
+        known=landed,
+    )
+    assert freed.head == second and freed.states[second].status is Status.INTEGRATING
