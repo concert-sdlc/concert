@@ -1,0 +1,45 @@
+src/concert/agents/claude_code.py
+  s_4aba28ccdf2cb3::t_531192f8d79ed3 1-122
+src/concert/agents/skills/_contract.md
+  s_4aba28ccdf2cb3::t_00430ced019e5c 1-10
+src/concert/agents/skills/implementing.md
+  s_4aba28ccdf2cb3::t_5513f4ea94f9c5 1-16
+src/concert/agents/skills/integrating.md
+  s_4aba28ccdf2cb3::t_b97a44db6491a8 1-12
+src/concert/agents/skills/review-code.md
+  s_4aba28ccdf2cb3::t_5d7f087b6c4c6c 1-10
+src/concert/agents/skills/review-security.md
+  s_4aba28ccdf2cb3::t_1039f614c654db 1-10
+src/concert/agents/skills/spec.md
+  s_4aba28ccdf2cb3::t_e64a2bb4e5147f 1-15
+src/concert/agents/skills/triage.md
+  s_4aba28ccdf2cb3::t_998569c966901b 1-14
+src/concert/agents/skills/uat.md
+  s_4aba28ccdf2cb3::t_97c3cd9fdf94cb 1-9
+src/concert/agents/skills/verifying_staging.md
+  s_4aba28ccdf2cb3::t_bd2bf9f401cd6d 1-8
+src/concert/core/handoff.py
+  s_4aba28ccdf2cb3::t_60b0d4ef5758d8 215-219
+src/concert/runner/worker.py
+  s_4aba28ccdf2cb3::t_9cb52b6b950195 47-51,90-93
+tests/agents/test_claude_code.py
+  s_4aba28ccdf2cb3::t_478448691b05e7 1-190
+tests/runner/test_worker.py
+  s_4aba28ccdf2cb3::t_9c4ed13d1a3704 7,160-171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "77bbc58b48f0deb2bb6f0343b13d004b51866790",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
