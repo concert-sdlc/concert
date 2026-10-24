@@ -1,0 +1,25 @@
+src/concert/cli/__init__.py
+  s_4aba28ccdf2cb3::t_6d74bdcbb814b0 13-14,17,33-35,42-43,83-130,164-169
+src/concert/runner/watchdog.py
+  s_4aba28ccdf2cb3::t_2bb65645957ef9 1-83
+tests/cli/test_main.py
+  s_4aba28ccdf2cb3::t_6867d7e148a5d0 157-208
+tests/runner/test_watchdog.py
+  s_4aba28ccdf2cb3::t_5c3fac26dd8bf6 1-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2a4ce83f15b0737592aa17fb29b0657f36337155",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
