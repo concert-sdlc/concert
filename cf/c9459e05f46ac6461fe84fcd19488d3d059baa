@@ -1,0 +1,25 @@
+pyproject.toml
+  s_4aba28ccdf2cb3::t_c9d2c28f3934d1 10
+src/concert/github/http.py
+  s_4aba28ccdf2cb3::t_0535a72ee969e6 1-172
+tests/github/test_http.py
+  s_4aba28ccdf2cb3::t_cbcbab1d13dd94 1-159
+uv.lock
+  s_4aba28ccdf2cb3::t_47312ab9ea9381 5-89,104,117-120,130-192,229-237
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cfc9459e05f46ac6461fe84fcd19488d3d059baa",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
