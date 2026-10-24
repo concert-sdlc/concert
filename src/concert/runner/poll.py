@@ -396,7 +396,12 @@ class _Poll:
             if self.load is not None
             else dict(Counter(run.runner for run in self.state.active_runs))
         )
-        head = self.github.get_ref(self.branch)
+        # staging verification runs on the merge commit; every other run on the issue branch
+        head = (
+            self.state.merge_sha
+            if self.state.status is Status.VERIFYING_STAGING
+            else self.github.get_ref(self.branch)
+        )
         assignments = plan_assignments(
             self.state, self.issue, self.config.runners, heartbeats, load, head, self.now
         )
