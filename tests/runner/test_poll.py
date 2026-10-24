@@ -1,7 +1,5 @@
 """The poll loop: comments in, events out, driven against the fake GitHub with no agent."""
 
-import pytest
-
 from concert.core.derive import IssueState
 from concert.core.handoff import Handoff
 from concert.core.transitions import Status
@@ -157,11 +155,6 @@ def test_tampering_with_an_early_event_blocks_the_issue_and_posts_nothing() -> N
     assert world.pm.get_status(issue) == "blocked"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="a deleted or edited tail of the log leaves a valid shorter chain; the append-only "
-    "mirror on concert-events is what detects it (not built yet)",
-)
 def test_removing_the_latest_events_is_detected() -> None:
     world = World()
     issue = world.new_issue()

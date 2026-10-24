@@ -7,8 +7,9 @@ from concert.core.commands import Role
 from concert.core.events import append_event, parse_event
 from concert.core.spec_hash import spec_tree_hash
 from concert.github.api import GitHubApi, Identity
-from concert.github.comments import extract_events, render_event_comment, render_handoff_comment
+from concert.github.comments import render_handoff_comment
 from concert.github.git_facts import GitFacts
+from concert.github.mirror import Mirror, publish_events, reconcile
 from concert.runner.poll import PollResult, RunnerConfig, poll_issue
 from tests.fakes.github import FakeGitHub
 
@@ -37,7 +38,9 @@ class World:
     def __init__(self) -> None:
         self.fake = FakeGitHub()
         self.fake.seed_branch("staging", {"README": "x"})
+        self.fake.seed_branch("concert-events", {})
         self.pm: GitHubApi = self.fake.client(PM)
+        self.mirror = Mirror(self.pm, author=PM.login)
         self.facts = GitFacts(self.pm, base_branch="staging")
         self.runs = 0
 
@@ -46,16 +49,16 @@ class World:
 
     def poll(self, issue: int) -> PollResult:
         self.fake.tick(1)
-        return poll_issue(self.pm, issue, CONFIG, self.facts)
+        return poll_issue(self.pm, self.mirror, issue, CONFIG, self.facts)
 
     def say(self, who: Identity, issue: int, body: str) -> int:
         return self.fake.client(who).add_comment(issue, body).id
 
     def pm_post(self, issue: int, kind: str, data: Mapping[str, Any]) -> None:
-        extraction = extract_events(self.pm.list_comments(issue), PM)
-        chain = [parse_event(r.event) for r in extraction.records]
+        trusted = reconcile(self.pm, self.mirror, issue, self.pm.list_comments(issue), PM)
+        chain = [parse_event(event) for event in trusted.events]
         event = append_event(chain, epoch=CONFIG.epoch, kind=kind, data=data)
-        self.pm.add_comment(issue, render_event_comment([event]))
+        publish_events(self.pm, self.mirror, issue, [event])
 
     def assign(self, issue: int, head: str | None) -> str:
         self.runs += 1

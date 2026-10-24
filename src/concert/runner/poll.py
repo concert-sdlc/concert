@@ -24,8 +24,8 @@ from concert.github.comments import (
     extract_events,
     extract_handoffs,
     lease_expiry_comment_ids,
-    render_event_comment,
 )
+from concert.github.mirror import Mirror, publish_events, reconcile
 
 
 @dataclass(frozen=True)
@@ -56,17 +56,26 @@ class PollResult:
 
 
 def poll_issue(
-    github: GitHubApi, issue: int, config: RunnerConfig, facts: FactsProvider
+    github: GitHubApi, mirror: Mirror, issue: int, config: RunnerConfig, facts: FactsProvider
 ) -> PollResult:
     comments = github.list_comments(issue)
+    reconciled = reconcile(github, mirror, issue, comments, config.pm)
+    if reconciled.republished:
+        comments = github.list_comments(issue)  # a crash was repaired: read the new comment
     extraction = extract_events(comments, config.pm)
-    raw = [record.event for record in extraction.records]
+    # only events the mirror confirms are history; comment ids come from the same comments
+    records = [r for r in extraction.records if r.event in reconciled.events]
+    raw = reconciled.events
     state = derive(raw, budget=config.budget)
     card = github.get_status(issue)
     card_was_reverted = card is not None and card != state.status.value
 
-    if extraction.problems:
-        reason = "; ".join(extraction.problems)
+    if reconciled.blocked_reason is not None:
+        return _finish(
+            github, issue, replace_blocked(state, reconciled.blocked_reason), card_was_reverted, 0
+        )
+    if reconciled.problems:
+        reason = "; ".join(reconciled.problems)
         return _finish(github, issue, replace_blocked(state, reason), card_was_reverted, 0)
     if state.blocked_reason is not None:
         return _finish(github, issue, state, card_was_reverted, 0)
@@ -75,14 +84,14 @@ def poll_issue(
     posted = 0
     if not chain:
         created = append_event([], epoch=config.epoch, kind="created", data={"issue_type": "code"})
-        github.add_comment(issue, render_event_comment([created]))
+        publish_events(github, mirror, issue, [created])
         chain, posted = [created], 1
         raw = [created.to_dict()]
         state = derive(raw, budget=config.budget)
 
-    assignments = assignments_from(extraction.records)
-    heads = assignment_heads(extraction.records)
-    lease_expiry = lease_expiry_comment_ids(extraction.records)
+    assignments = assignments_from(records)
+    heads = assignment_heads(records)
+    lease_expiry = lease_expiry_comment_ids(records)
     handoff_extraction = extract_handoffs(comments, config.runner_ids, lease_expiry)
     invalid = [problem for problem in handoff_extraction.problems]
     ignored: list[str] = []
@@ -132,7 +141,7 @@ def poll_issue(
     proposals = decide(state, accepted, valid)
     if proposals:
         new_events = _chain_events(chain, proposals, config.epoch)
-        github.add_comment(issue, render_event_comment(new_events))
+        publish_events(github, mirror, issue, new_events)
         posted += len(new_events)
         raw = [*raw, *(event.to_dict() for event in new_events)]
         state = derive(raw, budget=config.budget)

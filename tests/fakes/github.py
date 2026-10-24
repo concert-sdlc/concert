@@ -240,6 +240,9 @@ class FakeClient:
     def read_tree(self, sha: str) -> Mapping[str, str]:
         return dict(self.fake.commits[self.fake.resolve(sha)].tree)
 
+    def read_file(self, ref: str, path: str) -> str | None:
+        return self.read_tree(ref).get(path)
+
     def commit_parents(self, sha: str) -> tuple[str, ...]:
         return self.fake.commits[self.fake.resolve(sha)].parents
 
