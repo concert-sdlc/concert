@@ -143,3 +143,18 @@ def test_one_issue_failing_does_not_stop_the_others() -> None:
     tick(r, 3)
     assert r.world.state(second).status in (Status.TRIAGE, Status.SPEC, Status.SPEC_APPROVAL)
     assert any("#1" in e and "GitHub exploded" in e for e in r.service.errors)
+
+
+def test_a_runner_that_is_not_registered_does_not_act() -> None:
+    r = rig()
+    r.service.runner = "intruder"
+    with pytest.raises(ConfigError, match="not registered"):
+        tick(r)
+
+
+def test_the_worker_takes_its_identities_from_the_configuration() -> None:
+    r = rig()
+    r.service.worker.pm = PM.__class__(user_id=0, login="x", is_bot=True)
+    r.service.worker.me = PM.__class__(user_id=0, login="x", is_bot=True)
+    tick(r)
+    assert r.service.worker.pm.user_id == PM.user_id and r.service.worker.me.user_id == VM1.user_id

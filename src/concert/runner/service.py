@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from concert.core.derive import IssueState
-from concert.github.api import GitHubApi, NotFound
+from concert.github.api import GitHubApi, Identity, NotFound
 from concert.github.branches import EVENTS_BRANCH, ensure_orphan_branch
 from concert.github.heartbeats import heartbeat_ref, write_heartbeat
 from concert.github.mirror import Mirror
@@ -40,6 +40,10 @@ class Service:
     def tick(self) -> None:
         now = int(self.clock())
         config = self._load_config()
+        if self.runner not in config.runner_ids:
+            raise ConfigError(f"runner {self.runner!r} is not registered in {PROCESS_FILE}")
+        self.worker.pm = config.pm
+        self.worker.me = Identity(config.runner_ids[self.runner], self.runner, is_bot=True)
         ensure_orphan_branch(self.pm_github, EVENTS_BRANCH, "concert")
         for name in (self.runner, "pm"):
             ensure_orphan_branch(self.pm_github, heartbeat_ref(name), "concert")
