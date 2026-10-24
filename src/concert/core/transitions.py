@@ -46,6 +46,7 @@ class Trigger(Enum):
     FAILED_REVERTED = "failed_reverted"  # verification failed twice and the auto-revert succeeded
     VERIFY_FAILED = "verify_failed"  # verification failed and nothing was auto-reverted: freeze
     BUDGET_EXCEEDED = "budget_exceeded"
+    CHECK_FAILED = "check_failed"  # a deterministic check failed (foreign commit, unexpected push)
     # revert issues (no agent: the PM opens the revert PR and dispatches CI)
     CI_GREEN = "ci_green"
     CI_FAILED_TWICE = "ci_failed_twice"
@@ -104,6 +105,7 @@ _CODE_TABLE: dict[tuple[Status, Trigger], Status] = {
     (_S.VERIFYING_STAGING, _T.FAILED_REVERTED): _S.IMPLEMENTING,
     (_S.VERIFYING_STAGING, _T.VERIFY_FAILED): _S.BLOCKED,  # freeze fallback
     **{(state, _T.BUDGET_EXCEEDED): _S.BLOCKED for state in _BUDGETED_STATES},
+    **{(state, _T.CHECK_FAILED): _S.BLOCKED for state in _BUDGETED_STATES},
 }
 
 # A hotfix runs the full lifecycle, but a failed verification of its own merge is never

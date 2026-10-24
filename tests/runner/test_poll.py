@@ -16,12 +16,19 @@ def to_spec_approval(world: World, issue: int) -> tuple[str, str]:
     run = world.assign(issue, head=None)
     world.handoff(issue, run, "triage", "spec")
     world.poll(issue)
-    world.pm.create_branch(f"pm/{issue}", "staging")
-    base = world.pm.get_ref(f"pm/{issue}")
+    base = world.pm.get_ref(f"pm/{issue}")  # the poll created the issue branch on entering spec
     run = world.assign(issue, head=base)
-    sha = world.worker_commit(f"pm/{issue}", SPEC_FILES)
+    sha = world.wip_commit(issue, run, SPEC_FILES)
     spec_hash = world.spec_hash(sha, issue)
-    world.handoff(issue, run, "spec", "ready_for_approval", commit_sha=sha, artifact_rev=spec_hash)
+    world.handoff(
+        issue,
+        run,
+        "spec",
+        "ready_for_approval",
+        commit_sha=sha,
+        artifact_rev=spec_hash,
+        run_commits=[sha],
+    )
     result = world.poll(issue)
     assert result.status is Status.SPEC_APPROVAL, result
     return sha, spec_hash
@@ -176,7 +183,7 @@ def test_an_issue_travels_from_inbox_to_uat() -> None:
 
     head = world.pm.get_ref(f"pm/{issue}")
     run = world.assign(issue, head=head)
-    code_commit = world.worker_commit(f"pm/{issue}", {"backend/export.py": "def export(): ..."})
+    code_commit = world.wip_commit(issue, run, {"backend/export.py": "def export(): ..."})
     world.handoff(
         issue,
         run,
@@ -211,9 +218,15 @@ def test_review_waits_for_both_reviewers() -> None:
     _sha, spec_hash = to_implementing(world, issue)
     head = world.pm.get_ref(f"pm/{issue}")
     run = world.assign(issue, head=head)
-    code_commit = world.worker_commit(f"pm/{issue}", {"backend/export.py": "x"})
+    code_commit = world.wip_commit(issue, run, {"backend/export.py": "x"})
     world.handoff(
-        issue, run, "implementing", "done", commit_sha=code_commit, artifact_rev=spec_hash
+        issue,
+        run,
+        "implementing",
+        "done",
+        commit_sha=code_commit,
+        artifact_rev=spec_hash,
+        run_commits=[code_commit],
     )
     world.poll(issue)
     run = world.assign(issue, head=code_commit)
@@ -235,8 +248,16 @@ def test_changing_the_spec_during_implementation_sends_the_issue_back_for_approv
     _sha, spec_hash = to_implementing(world, issue)
     head = world.pm.get_ref(f"pm/{issue}")
     run = world.assign(issue, head=head)
-    drifted = world.worker_commit(f"pm/{issue}", {"docs/specs/1/spec.md": "# spec, but different"})
-    world.handoff(issue, run, "implementing", "done", commit_sha=drifted, artifact_rev=spec_hash)
+    drifted = world.wip_commit(issue, run, {"docs/specs/1/spec.md": "# spec, but different"})
+    world.handoff(
+        issue,
+        run,
+        "implementing",
+        "done",
+        commit_sha=drifted,
+        artifact_rev=spec_hash,
+        run_commits=[drifted],
+    )
     assert world.poll(issue).status is Status.SPEC_APPROVAL
 
 

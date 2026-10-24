@@ -1,23 +1,36 @@
 """The poll loop for one issue.
 
-Reads the issue's comments, trusts only what GitHub's facts support, derives the state from
-the PM's own events, validates handoffs and commands against it, asks `decide` for the next
-events and posts them as one coalesced comment, then reconciles the Status card with the
-derived state. Everything that decides lives in `core`; this module only moves data.
+Reads the issue's comments, trusts only what the mirror and GitHub's facts support, derives the
+state from the PM's own events, validates handoffs and commands against it, asks `decide` for
+the next events, assigns runs, expires leases, and reconciles the Status card with the derived
+state. Everything that decides lives in `core`; this module moves data and performs the
+idempotent side effects (creating the issue branch, fast-forwarding it to an accepted commit).
 """
 
+from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
+from concert.core.assign import Heartbeat, RunnerInfo, expire_leases, plan_assignments
 from concert.core.commands import IssueContext, Role, Valid, validate_command
+from concert.core.commit_binding import ForeignCommits, check_commit_binding
 from concert.core.decide import AcceptedHandoff, Proposed, ValidCommand, decide
 from concert.core.derive import IssueState, derive
 from concert.core.events import Event, append_event, parse_event
-from concert.core.handoff import Accepted, Handoff, Ignored, RunFacts, accept_handoff
-from concert.core.transitions import Status
-from concert.github.api import GitHubApi, Identity
+from concert.core.handoff import (
+    Accepted,
+    Handoff,
+    Ignored,
+    RunFacts,
+    RunState,
+    accept_handoff,
+)
+from concert.core.transitions import IssueType, Status, Trigger, is_terminal
+from concert.github.api import Comment, GitHubApi, Identity
 from concert.github.comments import (
+    EventRecord,
+    HandoffComment,
     assignment_heads,
     assignments_from,
     extract_commands,
@@ -25,7 +38,10 @@ from concert.github.comments import (
     extract_handoffs,
     lease_expiry_comment_ids,
 )
+from concert.github.heartbeats import read_heartbeat
 from concert.github.mirror import Mirror, publish_events, reconcile
+
+_COMMITTING = frozenset({RunState.SPEC, RunState.IMPLEMENTING, RunState.INTEGRATING})
 
 
 @dataclass(frozen=True)
@@ -36,6 +52,7 @@ class RunnerConfig:
     epoch: int
     budget: int
     base_branch: str
+    runners: Sequence[RunnerInfo] = ()  # runners the PM may assign to; empty: no assignments
 
 
 class FactsProvider(Protocol):
@@ -56,106 +73,274 @@ class PollResult:
 
 
 def poll_issue(
-    github: GitHubApi, mirror: Mirror, issue: int, config: RunnerConfig, facts: FactsProvider
+    github: GitHubApi,
+    mirror: Mirror,
+    issue: int,
+    config: RunnerConfig,
+    facts: FactsProvider,
+    now: int = 0,
+    load: Mapping[str, int] | None = None,
 ) -> PollResult:
-    comments = github.list_comments(issue)
-    reconciled = reconcile(github, mirror, issue, comments, config.pm)
-    if reconciled.republished:
-        comments = github.list_comments(issue)  # a crash was repaired: read the new comment
-    extraction = extract_events(comments, config.pm)
-    # only events the mirror confirms are history; comment ids come from the same comments
-    records = [r for r in extraction.records if r.event in reconciled.events]
-    raw = reconciled.events
-    state = derive(raw, budget=config.budget)
-    card = github.get_status(issue)
-    card_was_reverted = card is not None and card != state.status.value
+    return _Poll(github, mirror, issue, config, facts, now, load).run()
 
-    if reconciled.blocked_reason is not None:
-        return _finish(
-            github, issue, replace_blocked(state, reconciled.blocked_reason), card_was_reverted, 0
+
+class _Poll:
+    def __init__(
+        self,
+        github: GitHubApi,
+        mirror: Mirror,
+        issue: int,
+        config: RunnerConfig,
+        facts: FactsProvider,
+        now: int,
+        load: Mapping[str, int] | None,
+    ) -> None:
+        self.github = github
+        self.mirror = mirror
+        self.issue = issue
+        self.config = config
+        self.facts = facts
+        self.now = now
+        self.load = load
+        self.branch = f"pm/{issue}"
+        self.posted = 0
+        self.rejected: list[str] = []
+        self.ignored: list[str] = []
+        self.invalid: list[str] = []
+        self.raw: list[dict[str, object]] = []
+        self.chain: list[Event] = []
+        self.records: list[EventRecord] = []
+        self.handoff_items: list[HandoffComment] = []
+        self.state = IssueState()
+
+    # --- the poll ------------------------------------------------------------------------------
+
+    def run(self) -> PollResult:
+        comments = self.github.list_comments(self.issue)
+        reconciled = reconcile(self.github, self.mirror, self.issue, comments, self.config.pm)
+        if reconciled.republished:
+            comments = self.github.list_comments(self.issue)
+        extraction = extract_events(comments, self.config.pm)
+        self.records = [r for r in extraction.records if r.event in reconciled.events]
+        self.raw = list(reconciled.events)
+        self.state = derive(self.raw, budget=self.config.budget)
+        card = self.github.get_status(self.issue)
+        self.card_was_reverted = card is not None and card != self.state.status.value
+
+        if reconciled.blocked_reason is not None:
+            return self._finish(blocked=reconciled.blocked_reason)
+        if reconciled.problems:
+            return self._finish(blocked="; ".join(reconciled.problems))
+        if self.state.blocked_reason is not None:
+            return self._finish()
+
+        self.chain = [parse_event(event) for event in self.raw]
+        if not self.chain:
+            self._post([Proposed("created", {"issue_type": "code"})])
+        self._create_branch()
+        if self._check_branch():
+            return self._finish()
+        self._intake()
+        self._create_branch()  # intake may have moved the issue into spec
+        self._runs()
+        return self._finish()
+
+    # --- steps -----------------------------------------------------------------------------------
+
+    def _create_branch(self) -> None:
+        """Entering spec creates the issue branch from the base and records its first commit."""
+        if (
+            self.state.status is Status.SPEC
+            and self.state.branch_base is None
+            and self.state.issue_type is not IssueType.REVERT
+        ):
+            sha = self.github.get_ref(self.branch) or self.github.create_branch(
+                self.branch, self.config.base_branch
+            )
+            self._post([Proposed("branch_created", {"branch": self.branch, "sha": sha})])
+
+    def _check_branch(self) -> bool:
+        """On every poll the issue branch must be at the last accepted commit: workers push only
+        their own WIP refs. A branch that merely lags it (the PM died before advancing it) is
+        repaired; anything else is a foreign push."""
+        state = self.state
+        if (
+            state.branch_base is None
+            or state.status in (Status.INBOX, Status.BLOCKED)
+            or is_terminal(state.status)
+        ):
+            return False
+        head = self.github.get_ref(self.branch)
+        if head is None:
+            return False
+        expected = state.head_sha or state.branch_base
+        if head == expected:
+            return False
+        if self._behind(head, expected):
+            self.github.update_ref(self.branch, expected)
+            return False
+        return self._block(f"unexpected push: {head} (expected {expected})")
+
+    def _behind(self, head: str, expected: str) -> bool:
+        ahead = self.github.list_commits(head, expected)
+        return bool(ahead) and not self.github.list_commits(expected, head)
+
+    def _intake(self) -> None:
+        state = self.state
+        all_comments = self.github.list_comments(self.issue)
+        assignments = assignments_from(self.records)
+        heads = assignment_heads(self.records)
+        lease_expiry = lease_expiry_comment_ids(self.records)
+        extraction = extract_handoffs(all_comments, self.config.runner_ids, lease_expiry)
+        self.handoff_items = extraction.items
+        self.invalid.extend(extraction.problems)
+
+        accepted: list[AcceptedHandoff] = []
+        for item in extraction.items:
+            handoff = item.handoff
+            if handoff.run_id in state.accepted_runs or handoff.state.value != state.status.value:
+                continue
+            run_facts = self.facts.facts(self.issue, handoff, state, heads.get(handoff.run_id))
+            decision = accept_handoff(handoff, assignments, item.block, run_facts)
+            if isinstance(decision, Accepted):
+                accepted.append(AcceptedHandoff(handoff, decision, item.comment_id))
+            elif isinstance(decision, Ignored):
+                self.ignored.append(f"comment {item.comment_id}: {decision.reason}")
+            else:
+                self.invalid.append(f"comment {item.comment_id}: {decision.reason}")
+
+        if self._foreign_commits(accepted):
+            return
+
+        valid = self._valid_commands(all_comments)
+        proposals = decide(state, accepted, valid)
+        if proposals:
+            self._post(proposals)
+            self._check_branch()
+
+    def _foreign_commits(self, accepted: Sequence[AcceptedHandoff]) -> bool:
+        """Every commit a committing run brings must be one the worker reported."""
+        prior = [
+            i.handoff for i in self.handoff_items if i.handoff.run_id in self.state.accepted_runs
+        ]
+        for item in accepted:
+            handoff = item.handoff
+            if handoff.state not in _COMMITTING or handoff.commit_sha is None:
+                continue
+            commits = [
+                c.sha for c in self.github.list_commits(self.config.base_branch, handoff.commit_sha)
+            ]
+            verdict = check_commit_binding(commits, [*prior, handoff])
+            if isinstance(verdict, ForeignCommits):
+                return self._block(f"foreign commit: {', '.join(verdict.shas)}")
+        return False
+
+    def _valid_commands(self, comments: Sequence[Comment]) -> list[ValidCommand]:
+        state = self.state
+        context = IssueContext(
+            status=state.status,
+            issue_type=state.issue_type,
+            spec_hash=state.spec_rev,
+            head_sha=state.head_sha,
+            adoption_report_hash=None,
+            workflow_diff_hash=None,
+            unblock_targets=unblock_targets(state),
+            existing_issues=frozenset({self.issue}),
         )
-    if reconciled.problems:
-        reason = "; ".join(reconciled.problems)
-        return _finish(github, issue, replace_blocked(state, reason), card_was_reverted, 0)
-    if state.blocked_reason is not None:
-        return _finish(github, issue, state, card_was_reverted, 0)
+        valid: list[ValidCommand] = []
+        for command in extract_commands(comments, self.config.roles):
+            if command.comment_id in state.consumed_commands:
+                continue
+            verdict = validate_command(command.command, command.actor, command.facts, context)
+            if isinstance(verdict, Valid):
+                valid.append(
+                    ValidCommand(
+                        command.comment_id,
+                        command.command,
+                        command.actor,
+                        command.body,
+                        command.created_at,
+                    )
+                )
+            else:
+                self.rejected.append(f"comment {command.comment_id}: {verdict.reason}")
+        return valid
 
-    chain = [parse_event(event) for event in raw]
-    posted = 0
-    if not chain:
-        created = append_event([], epoch=config.epoch, kind="created", data={"issue_type": "code"})
-        publish_events(github, mirror, issue, [created])
-        chain, posted = [created], 1
-        raw = [created.to_dict()]
-        state = derive(raw, budget=config.budget)
+    def _runs(self) -> None:
+        """Expire lapsed leases, then assign runs to open slots."""
+        if not self.config.runners:
+            return
+        heartbeats: dict[str, Heartbeat] = {}
+        for runner in self.config.runners:
+            beat = read_heartbeat(self.github, runner.name)
+            if beat is not None:
+                heartbeats[runner.name] = beat
+        expired = expire_leases(self.state, heartbeats, self.now)
+        if expired:
+            self._post(expired)
+        if self.state.blocked_reason is not None or self.state.status is Status.BLOCKED:
+            return
+        load = (
+            self.load
+            if self.load is not None
+            else dict(Counter(run.runner for run in self.state.active_runs))
+        )
+        head = self.github.get_ref(self.branch)
+        assignments = plan_assignments(
+            self.state, self.issue, self.config.runners, heartbeats, load, head, self.now
+        )
+        if assignments:
+            self._post(assignments)
 
-    assignments = assignments_from(records)
-    heads = assignment_heads(records)
-    lease_expiry = lease_expiry_comment_ids(records)
-    handoff_extraction = extract_handoffs(comments, config.runner_ids, lease_expiry)
-    invalid = [problem for problem in handoff_extraction.problems]
-    ignored: list[str] = []
-    accepted: list[AcceptedHandoff] = []
-    for item in handoff_extraction.items:
-        handoff = item.handoff
-        if handoff.run_id in state.accepted_runs or handoff.state.value != state.status.value:
-            continue
-        run_facts = facts.facts(issue, handoff, state, heads.get(handoff.run_id))
-        decision = accept_handoff(handoff, assignments, item.block, run_facts)
-        if isinstance(decision, Accepted):
-            accepted.append(AcceptedHandoff(handoff, decision, item.comment_id))
-        elif isinstance(decision, Ignored):
-            ignored.append(f"comment {item.comment_id}: {decision.reason}")
-        else:
-            invalid.append(f"comment {item.comment_id}: {decision.reason}")
+    # --- helpers ---------------------------------------------------------------------------------
 
-    context = IssueContext(
-        status=state.status,
-        issue_type=state.issue_type,
-        spec_hash=state.spec_rev,
-        head_sha=state.head_sha,
-        adoption_report_hash=None,
-        workflow_diff_hash=None,
-        unblock_targets=unblock_targets(state),
-        existing_issues=frozenset({issue}),
-    )
-    valid: list[ValidCommand] = []
-    rejected: list[str] = []
-    for command in extract_commands(comments, config.roles):
-        if command.comment_id in state.consumed_commands:
-            continue
-        verdict = validate_command(command.command, command.actor, command.facts, context)
-        if isinstance(verdict, Valid):
-            valid.append(
-                ValidCommand(
-                    command.comment_id,
-                    command.command,
-                    command.actor,
-                    command.body,
-                    command.created_at,
+    def _block(self, note: str) -> bool:
+        proposal = Proposed(
+            "transition",
+            {
+                "from": self.state.status.value,
+                "to": Status.BLOCKED.value,
+                "trigger": Trigger.CHECK_FAILED.value,
+                "note": note,
+            },
+        )
+        self._post([proposal])
+        return True
+
+    def _post(self, proposals: Sequence[Proposed]) -> None:
+        new_events: list[Event] = []
+        for proposal in proposals:
+            new_events.append(
+                append_event(
+                    [*self.chain, *new_events],
+                    epoch=self.config.epoch,
+                    kind=proposal.kind,
+                    data=proposal.data,
                 )
             )
-        else:
-            rejected.append(f"comment {command.comment_id}: {verdict.reason}")
+        publish_events(self.github, self.mirror, self.issue, new_events)
+        self.chain.extend(new_events)
+        self.raw.extend(event.to_dict() for event in new_events)
+        self.posted += len(new_events)
+        self.state = derive(self.raw, budget=self.config.budget)
 
-    proposals = decide(state, accepted, valid)
-    if proposals:
-        new_events = _chain_events(chain, proposals, config.epoch)
-        publish_events(github, mirror, issue, new_events)
-        posted += len(new_events)
-        raw = [*raw, *(event.to_dict() for event in new_events)]
-        state = derive(raw, budget=config.budget)
-
-    result = _finish(github, issue, state, card_was_reverted, posted)
-    return PollResult(
-        status=result.status,
-        posted=result.posted,
-        blocked_reason=result.blocked_reason,
-        rejected_commands=rejected,
-        ignored_handoffs=ignored,
-        invalid_handoffs=invalid,
-        status_reverted=result.status_reverted,
-    )
+    def _finish(self, blocked: str | None = None) -> PollResult:
+        state = (
+            replace(self.state, status=Status.BLOCKED, blocked_reason=blocked)
+            if blocked
+            else self.state
+        )
+        if self.github.get_status(self.issue) != state.status.value:
+            self.github.set_status(self.issue, state.status.value)
+        return PollResult(
+            status=state.status,
+            posted=self.posted,
+            blocked_reason=state.blocked_reason,
+            rejected_commands=self.rejected,
+            ignored_handoffs=self.ignored,
+            invalid_handoffs=self.invalid,
+            status_reverted=self.card_was_reverted,
+        )
 
 
 def unblock_targets(state: IssueState) -> frozenset[Status]:
@@ -166,32 +351,3 @@ def unblock_targets(state: IssueState) -> frozenset[Status]:
         if state.head_sha is not None:
             targets.add(Status.IN_REVIEW)
     return frozenset(targets)
-
-
-def replace_blocked(state: IssueState, reason: str) -> IssueState:
-    from dataclasses import replace
-
-    return replace(state, status=Status.BLOCKED, blocked_reason=reason)
-
-
-def _chain_events(chain: Sequence[Event], proposals: Sequence[Proposed], epoch: int) -> list[Event]:
-    events: list[Event] = []
-    for proposal in proposals:
-        events.append(
-            append_event([*chain, *events], epoch=epoch, kind=proposal.kind, data=proposal.data)
-        )
-    return events
-
-
-def _finish(
-    github: GitHubApi, issue: int, state: IssueState, card_was_reverted: bool, posted: int
-) -> PollResult:
-    """Reconcile the Status card with the derived state: whatever differs is reverted."""
-    if github.get_status(issue) != state.status.value:
-        github.set_status(issue, state.status.value)
-    return PollResult(
-        status=state.status,
-        posted=posted,
-        blocked_reason=state.blocked_reason,
-        status_reverted=card_was_reverted,
-    )

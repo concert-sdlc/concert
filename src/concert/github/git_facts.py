@@ -7,7 +7,7 @@ from concert.github.api import GitHubApi, NotFound
 
 
 class GitFacts:
-    """Facts about an issue's branch `pm/<issue>` at the end of a run."""
+    """Facts about a run's commits (its WIP ref, or the issue branch) at the end of a run."""
 
     def __init__(self, github: GitHubApi, base_branch: str) -> None:
         self._github = github
@@ -17,13 +17,17 @@ class GitFacts:
         self, issue: int, handoff: Handoff, state: IssueState, run_start_head: str | None
     ) -> RunFacts:
         sha = handoff.commit_sha
-        branch = f"pm/{issue}"
         exists = False
         if sha is not None:
-            try:
-                exists = sha in {c.sha for c in self._github.list_commits(self._base, branch)}
-            except NotFound:
-                exists = False
+            # a worker pushes its commits to its own WIP ref; the PM advances pm/<issue> later
+            wip = f"pm-wip/{handoff.runner}/{issue}/{handoff.run_id}"
+            for ref in (wip, f"pm/{issue}"):
+                try:
+                    exists = sha in {c.sha for c in self._github.list_commits(self._base, ref)}
+                except NotFound:
+                    continue
+                if exists:
+                    break
             if not exists and sha == run_start_head:
                 exists = True  # a run that made no commits reports the head it started from
         tree = dict(self._github.read_tree(sha)) if exists and sha is not None else {}

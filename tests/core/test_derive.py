@@ -302,3 +302,30 @@ def test_a_transition_drops_runs_still_in_flight_for_the_old_state() -> None:
     journey.add("assignment", assignment("r-1-1"))
     journey.move("triage", "blocked", "budget_exceeded")
     assert derive(journey.raw()).active_runs == ()
+
+
+# --- notes and the issue branch ------------------------------------------------------------------
+
+
+def test_a_block_by_a_failed_check_keeps_its_note_until_unblocked() -> None:
+    journey = Journey().add("created", {"issue_type": "code"}).move("inbox", "triage", "dispatch")
+    journey.add(
+        "transition",
+        {
+            "from": "triage",
+            "to": "blocked",
+            "trigger": "check_failed",
+            "note": "unexpected push: abc",
+        },
+    )
+    state = derive(journey.raw())
+    assert state.status is Status.BLOCKED and state.note == "unexpected push: abc"
+    journey.add("unblocked", {"to": "triage"})
+    assert derive(journey.raw()).note is None
+
+
+def test_the_branch_creation_commit_is_remembered() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("branch_created", {"branch": "pm/7", "sha": "base111"})
+    state = derive(journey.raw())
+    assert state.branch_base == "base111"

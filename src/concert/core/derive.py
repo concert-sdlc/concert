@@ -66,6 +66,8 @@ class IssueState:
     settled_reviewers: frozenset[str] = frozenset()
     infra_attempts: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
     last_expiry_at: int | None = None
+    note: str | None = None  # why a check blocked the issue
+    branch_base: str | None = None  # the branch-creation commit recorded by the PM
 
 
 class _Conflict(Exception):
@@ -142,7 +144,13 @@ def _apply(state: IssueState, event: Event) -> IssueState:
                 f"{derived.value}, the event says {target.value}"
             )
         approved = None if target in _UNAPPROVED_TARGETS else state.approved_spec_rev
-        return replace(_fresh_state_bookkeeping(state), status=target, approved_spec_rev=approved)
+        note = event.data.get("note")
+        return replace(
+            _fresh_state_bookkeeping(state),
+            status=target,
+            approved_spec_rev=approved,
+            note=str(note) if note is not None else None,
+        )
     if kind == "counter_charged":
         counters, outcome = state.counters.charge(Cause(event.data["cause"]))
         if outcome is Outcome.BLOCKED:
@@ -151,6 +159,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         return replace(state, counters=counters)
     if kind == "counter_reset":
         return replace(state, counters=state.counters.reset(AgentState(event.data["state"])))
+    if kind == "branch_created":
+        return replace(state, branch_base=str(event.data["sha"]))
     if kind == "assignment":
         data = event.data
         run = ActiveRun(
@@ -208,7 +218,7 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             raise _Conflict(
                 f"conflict at seq {event.seq}: unblocked but the issue is in {state.status.value}"
             )
-        return replace(_fresh_state_bookkeeping(state), status=Status(event.data["to"]))
+        return replace(_fresh_state_bookkeeping(state), status=Status(event.data["to"]), note=None)
     if kind in _RECORD_ONLY:
         return state
     raise ValueError(f"unknown event kind {kind!r} at seq {event.seq}")

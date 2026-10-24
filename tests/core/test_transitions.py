@@ -67,3 +67,26 @@ def test_gates_and_agent_states_are_not_terminal() -> None:
 @pytest.mark.parametrize("status", [S.SPEC_APPROVAL, S.HUMAN_UAT])
 def test_a_rejection_at_a_gate_that_exceeds_the_budget_goes_to_blocked(status: Status) -> None:
     assert next_status(status, Trigger.BUDGET_EXCEEDED) is S.BLOCKED
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        S.TRIAGE,
+        S.SPEC,
+        S.SPEC_APPROVAL,
+        S.IMPLEMENTING,
+        S.IN_REVIEW,
+        S.UAT,
+        S.HUMAN_UAT,
+        S.INTEGRATING,
+    ],
+)
+def test_a_failed_check_blocks_the_issue_from_any_working_state(status: Status) -> None:
+    assert next_status(status, Trigger.CHECK_FAILED) is S.BLOCKED
+
+
+def test_a_failed_check_has_no_effect_on_an_issue_that_is_not_started_or_finished() -> None:
+    for status in (S.INBOX, S.ON_STAGING, S.CLOSED):
+        with pytest.raises(InvalidTransition):
+            next_status(status, Trigger.CHECK_FAILED)
