@@ -44,6 +44,10 @@ SPEC_FILES = {
 }
 
 
+def spec_files(issue: int) -> dict[str, str]:
+    return {path.replace("/1/", f"/{issue}/"): body for path, body in SPEC_FILES.items()}
+
+
 class World:
     def __init__(self, auto: bool = False) -> None:
         self.config = CONFIG_AUTO if auto else CONFIG

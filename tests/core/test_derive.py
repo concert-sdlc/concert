@@ -490,3 +490,23 @@ def test_the_new_branch_is_recorded_by_name() -> None:
     journey.add("branch_created", {"branch": "pm/1-r1", "sha": "b1"})
     state = derive(journey.raw())
     assert state.branch == "pm/1-r1" and state.branch_base == "b1"
+
+
+def test_the_dispatch_time_is_taken_from_the_dispatch_command() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add(
+        "gate_passage",
+        {"comment_id": 4, "verb": "dispatch", "kind": None, "arg": "", "created_at": 1234},
+    )
+    assert derive(journey.raw()).dispatched_at == 1234
+
+
+def test_a_failed_verification_freezes_the_queue_until_the_issue_is_unblocked() -> None:
+    journey = to_in_review().move("in_review", "uat", "clean").move("uat", "human_uat", "passed")
+    journey.move("human_uat", "integrating", "approve_uat")
+    journey.move("integrating", "verifying_staging", "ready_to_merge")
+    assert derive(journey.raw()).froze_queue is False
+    journey.move("verifying_staging", "blocked", "verify_failed")
+    assert derive(journey.raw()).froze_queue is True
+    journey.add("unblocked", {"to": "implementing"})
+    assert derive(journey.raw()).froze_queue is False

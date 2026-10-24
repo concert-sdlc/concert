@@ -87,6 +87,8 @@ class PollResult:
     ignored_handoffs: list[str] = field(default_factory=list[str])
     invalid_handoffs: list[str] = field(default_factory=list[str])
     status_reverted: bool = False
+    state: IssueState = field(default_factory=IssueState)
+    ready_for_integration: bool = False  # in human_uat with every merge requirement met
 
 
 def poll_issue(
@@ -555,6 +557,10 @@ class _Poll:
             ignored_handoffs=self.ignored,
             invalid_handoffs=self.invalid,
             status_reverted=self.card_was_reverted,
+            state=state,
+            ready_for_integration=state.status is Status.HUMAN_UAT
+            and state.blocked_reason is None
+            and self._gate_ready(),
         )
 
 

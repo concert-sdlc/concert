@@ -4,7 +4,7 @@ from concert.core.derive import IssueState
 from concert.core.handoff import Handoff
 from concert.core.transitions import Status
 from concert.github.git_facts import GitFacts
-from tests.runner.helpers import ALICE, MALLORY, SPEC_FILES, World
+from tests.runner.helpers import ALICE, MALLORY, World, spec_files
 
 REVIEWERS = ("code", "security")
 
@@ -18,7 +18,7 @@ def to_spec_approval(world: World, issue: int) -> tuple[str, str]:
     world.poll(issue)
     base = world.pm.get_ref(f"pm/{issue}")  # the poll created the issue branch on entering spec
     run = world.assign(issue, head=base)
-    sha = world.wip_commit(issue, run, SPEC_FILES)
+    sha = world.wip_commit(issue, run, spec_files(issue))
     spec_hash = world.spec_hash(sha, issue)
     world.handoff(
         issue,

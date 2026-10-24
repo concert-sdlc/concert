@@ -6,7 +6,7 @@ import pytest
 
 from concert.core.transitions import Status
 from concert.runner.poll import poll_issue
-from tests.runner.helpers import ALICE, SPEC_FILES, World
+from tests.runner.helpers import ALICE, World, spec_files
 from tests.runner.test_crash import Crash, Flaky
 from tests.runner.test_poll import to_implementing, to_spec_approval
 
@@ -23,7 +23,7 @@ def post_spec_handoff(world: World, issue: int) -> None:
     world.handoff(issue, run, "triage", "spec")
     world.poll(issue)
     run = world.assign(issue, head=world.pm.get_ref(f"pm/{issue}"))
-    sha = world.wip_commit(issue, run, SPEC_FILES)
+    sha = world.wip_commit(issue, run, spec_files(issue))
     world.handoff(
         issue,
         run,

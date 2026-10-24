@@ -91,6 +91,8 @@ class IssueState:
     revert_head: str | None = None  # its head commit
     revert_ci_passed: bool | None = None  # None until the checks on its head are decided
     revert_merge_sha: str | None = None  # the revert commit on the base branch, once merged
+    dispatched_at: int = 0  # when the latest /dispatch was posted
+    froze_queue: bool = False  # a failed staging verification froze the queue; cleared on unblock
     verify_failures: int = 0  # failed staging verifications so far, re-runs included
     verify_failed: bool = False  # the failure is final: no re-run is left
     merge_sha: str | None = None  # the merge commit on the base branch, once the PM merged
@@ -204,6 +206,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         )
         if trigger is Trigger.FAILED_REVERTED:
             return _relanded(moved)
+        if trigger is Trigger.VERIFY_FAILED:
+            return replace(moved, froze_queue=True)
         return moved
     if kind == "counter_charged":
         counters, outcome = state.counters.charge(Cause(event.data["cause"]))
@@ -330,6 +334,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         state = replace(
             state, consumed_commands=state.consumed_commands | {int(data["comment_id"])}
         )
+        if data.get("verb") == "dispatch" and "created_at" in data:
+            state = replace(state, dispatched_at=int(data["created_at"]))
         if data.get("verb") == "approve" and data.get("kind") == "spec" and data.get("spec_hash"):
             state = replace(state, approved_spec_rev=str(data["spec_hash"]))
         return state
@@ -338,7 +344,12 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             raise _Conflict(
                 f"conflict at seq {event.seq}: unblocked but the issue is in {state.status.value}"
             )
-        return replace(_fresh_state_bookkeeping(state), status=Status(event.data["to"]), note=None)
+        return replace(
+            _fresh_state_bookkeeping(state),
+            status=Status(event.data["to"]),
+            note=None,
+            froze_queue=False,
+        )
     if kind in _RECORD_ONLY:
         return state
     raise ValueError(f"unknown event kind {kind!r} at seq {event.seq}")

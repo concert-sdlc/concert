@@ -42,3 +42,13 @@ def exempt_from_head_hold(issue_type: IssueType) -> bool:
 def counts_toward_k(issue_type: IssueType) -> bool:
     """Revert and hotfix merges do not count toward the K = 2 staging-rebase bound."""
     return issue_type is IssueType.CODE
+
+
+def pick_queue_head(waiting: list[QueueEntry], busy: bool, frozen: bool) -> QueueEntry | None:
+    """The first waiting issue allowed to integrate. `busy`: another merge is being integrated
+    or verified (the queue holds until it passes); `frozen`: staging verification failed.
+    Reverts and hotfixes pass both, since they are how the queue gets unstuck."""
+    for entry in queue_order(waiting):
+        if bypasses_freeze(entry.issue_type) or not (busy or frozen):
+            return entry
+    return None
