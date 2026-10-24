@@ -1,0 +1,25 @@
+src/concert/sandbox/egress.py
+  s_4aba28ccdf2cb3::t_93725d3abff4e3 1-79
+src/concert/sandbox/proxy.py
+  s_4aba28ccdf2cb3::t_f86323f79f249d 1-112
+tests/sandbox/test_egress.py
+  s_4aba28ccdf2cb3::t_edb45dc685670a 1-89
+tests/sandbox/test_proxy.py
+  s_4aba28ccdf2cb3::t_9b2096061c0638 1-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "becc03ca9ca0165b0ad64d5982fc0e8cba95f6f7",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
