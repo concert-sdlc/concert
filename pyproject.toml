@@ -1,0 +1,33 @@
+[project]
+name = "concert-sdlc"
+version = "0.1.0"
+description = "Concert: a project-management-driven AI SDLC runner (tracker state as process definition)."
+authors = [
+    { name = "Andrés González", email = "andres@aulasneo.com" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+concert = "concert.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.9,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "concert"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.6", "pyright>=1.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pyright]
+include = ["src", "tests"]
+typeCheckingMode = "strict"
