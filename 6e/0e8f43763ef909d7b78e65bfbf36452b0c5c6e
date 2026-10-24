@@ -1,0 +1,31 @@
+src/concert/core/decide.py
+  s_4aba28ccdf2cb3::t_f9466d1aa560d5 17,307,312-315,319-326
+src/concert/core/kits.py
+  s_4aba28ccdf2cb3::t_a99dfb40e0e473 193-223
+src/concert/runner/poll.py
+  s_4aba28ccdf2cb3::t_a6c1ec92d6b0d7 10,45,49,216-230,736
+tests/core/test_decide.py
+  s_4aba28ccdf2cb3::t_9d96ae0dc3512a 908-925
+tests/core/test_kits.py
+  s_4aba28ccdf2cb3::t_4c8faa44fd0d1a 133-149
+tests/runner/test_journey.py
+  s_4aba28ccdf2cb3::t_192f0d5307f302 184-218
+tests/runner/test_poll.py
+  s_4aba28ccdf2cb3::t_93bbd43438ebac 318-337
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6e0e8f43763ef909d7b78e65bfbf36452b0c5c6e",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
