@@ -18,6 +18,7 @@ from concert.core.commands import IssueContext, Role, Valid, validate_command
 from concert.core.commit_binding import ForeignCommits, check_commit_binding
 from concert.core.decide import AcceptedHandoff, Proposed, ValidCommand, decide, plan_integration
 from concert.core.derive import IssueState, derive
+from concert.core.effects import Effect, plan_effect
 from concert.core.events import Event, append_event, parse_event
 from concert.core.evidence import GatePolicy
 from concert.core.handoff import (
@@ -148,6 +149,7 @@ class _Poll:
             return self._finish()
         self._intake()
         self._create_branch()  # intake may have moved the issue into spec
+        self._effects()
         self._evidence()
         self._integrate()
         self._runs()
@@ -273,6 +275,42 @@ class _Poll:
             else:
                 self.rejected.append(f"comment {command.comment_id}: {verdict.reason}")
         return valid
+
+    def _effects(self) -> None:
+        """Perform the side effects the state calls for: announce, act, record the outcome.
+        Every action is idempotent, so a pending intent left by a crash is simply run again."""
+        for _ in range(4):  # a bound, never a loop on a failing effect
+            effect = plan_effect(self.state, self.issue, self.config.base_branch)
+            if effect is None:
+                return
+            if not effect.resumed:
+                self._post(
+                    [
+                        Proposed(
+                            "intent", {"key": effect.key, "action": effect.action, **effect.data}
+                        )
+                    ]
+                )
+            try:
+                result = self._perform(effect)
+            except ValueError as error:
+                self._block(str(error))
+                return
+            self._post([Proposed("outcome", {"key": effect.key, "result": result})])
+
+    def _perform(self, effect: Effect) -> dict[str, int]:
+        data = effect.data
+        if effect.action == "open_pr":
+            existing = self.github.find_pr(str(data["head"]))
+            pr = existing or self.github.create_pr(
+                str(data["head"]), str(data["base"]), str(data["title"])
+            )
+            return {"number": pr.number}
+        if effect.action == "mark_ready":
+            number = int(data["number"])
+            self.github.mark_ready(number)
+            return {"number": number}
+        raise ValueError(f"unknown side effect {effect.action!r}")
 
     def _evidence(self) -> None:
         """Record finished CI results for the current head (needs a gate policy)."""

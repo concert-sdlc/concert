@@ -222,3 +222,11 @@ def test_a_head_that_moved_after_the_pr_was_opened_changes_the_expected_head(
     with pytest.raises(StaleHead):
         gh.merge_pr(number, expected_head=head)
     assert gh.merge_pr(number, expected_head=newer)
+
+
+def test_find_pr_returns_the_open_pr_for_a_head_branch(fake: FakeGitHub) -> None:
+    number, _head = make_pr(fake)
+    gh = fake.client(PM)
+    found = gh.find_pr("pm/1")
+    assert found is not None and found.number == number
+    assert gh.find_pr("pm/2") is None

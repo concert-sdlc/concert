@@ -277,6 +277,12 @@ class FakeClient:
     def get_pr(self, number: int) -> PullRequest:
         return self._pr(number).pr
 
+    def find_pr(self, head: str) -> PullRequest | None:
+        return next(
+            (r.pr for r in self.fake.prs.values() if r.pr.head == head and r.pr.state == "open"),
+            None,
+        )
+
     def mark_ready(self, number: int) -> PullRequest:
         record = self._pr(number)
         record.pr = replace(record.pr, draft=False)
