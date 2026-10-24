@@ -176,7 +176,7 @@ def test_a_green_revert_pr_is_merged_at_its_head() -> None:
     assert (effect.key, effect.action, dict(effect.data)) == (
         "merge_revert",
         "merge_revert",
-        {"number": 9, "expected_head": "rv1"},
+        {"number": 9, "expected_head": "rv1", "reverts": "m1"},
     )
 
 

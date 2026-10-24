@@ -127,3 +127,26 @@ def test_the_revert_verification_run_starts_on_the_revert_commit() -> None:
     world.poll(issue)
     [run] = world.active(issue)
     assert run.head == revert_merge
+
+
+def test_a_look_alike_revert_pr_with_extra_changes_is_never_merged() -> None:
+    world, issue, _merge = failed_world()
+    original = world.state(issue).pr_number
+    # someone with write access pre-creates the branch the PM would adopt, adding a backdoor
+    gh = world.fake.client(world.pm_identity)
+    gh.create_branch(f"revert-pr-{original}", "staging")
+    gh.commit(
+        f"revert-pr-{original}",
+        "looks like a revert",
+        {"backend/export.py": None, "backend/backdoor.py": "evil()"},
+        author="x",
+        committer="x",
+    )
+    gh.create_pr(f"revert-pr-{original}", "staging", "Revert")
+    world.poll(issue)
+    world.fake.add_check_run(world.state(issue).revert_head or "", "tests", "success", "w1")
+    before = world.pm.get_ref("staging")
+    result = world.poll(issue)
+    assert result.status is Status.BLOCKED
+    assert "not the inverse" in (world.state(issue).note or "")
+    assert world.pm.get_ref("staging") == before

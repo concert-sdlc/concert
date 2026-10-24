@@ -341,7 +341,9 @@ class _Poll:
         if effect.action == "revert_pr":
             return self._open_revert(int(data["number"]))
         if effect.action == "merge_revert":
-            return self._merge_revert(int(data["number"]), str(data["expected_head"]))
+            return self._merge_revert(
+                int(data["number"]), str(data["expected_head"]), str(data["reverts"])
+            )
         raise ValueError(f"unknown side effect {effect.action!r}")
 
     def _merge(self, number: int, expected_head: str) -> dict[str, int | str | None]:
@@ -364,10 +366,26 @@ class _Poll:
             return {"error": str(error)}
         return {"number": pr.number, "branch": pr.head, "sha": self.github.get_ref(pr.head)}
 
-    def _merge_revert(self, number: int, expected_head: str) -> dict[str, int | str | None]:
-        """The PM merges its own auto-revert only if it leaves protected paths alone."""
-        base = self.github.read_tree(self.config.base_branch)
-        reverted = self.github.read_tree(expected_head)
+    def _merge_revert(
+        self, number: int, expected_head: str, reverts: str
+    ) -> dict[str, int | str | None]:
+        """The PM merges its own auto-revert without a human, so it merges only a PR whose tree is
+        exactly the base with the failed merge's changes undone, and which leaves protected paths
+        alone. Anything else (including a look-alike PR someone else opened) is refused."""
+        base = dict(self.github.read_tree(self.config.base_branch))
+        before = self.github.read_tree(self.github.commit_parents(reverts)[0])
+        merged = self.github.read_tree(reverts)
+        expected = dict(base)
+        for path in set(merged) | set(before):
+            if merged.get(path) == before.get(path):
+                continue
+            if before.get(path) is None:
+                expected.pop(path, None)
+            else:
+                expected[path] = before[path]
+        reverted = dict(self.github.read_tree(expected_head))
+        if reverted != expected:
+            return {"error": "the revert PR is not the inverse of the failed merge"}
         changed = [p for p in sorted(set(base) | set(reverted)) if base.get(p) != reverted.get(p)]
         touched = [p for p in changed if any(fnmatch(p, g) for g in self.config.protected_paths)]
         if touched:

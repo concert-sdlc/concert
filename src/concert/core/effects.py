@@ -87,6 +87,10 @@ def _plan_revert(state: IssueState) -> Effect | None:
             return None
         return Effect("revert_pr", "revert_pr", {"number": state.pr_number}, resumed=False)
     if state.revert_ci_passed and state.revert_head is not None:
-        data = {"number": state.revert_pr, "expected_head": state.revert_head}
+        data = {
+            "number": state.revert_pr,
+            "expected_head": state.revert_head,
+            "reverts": state.merge_sha,
+        }
         return Effect("merge_revert", "merge_revert", data, resumed=False)
     return None
