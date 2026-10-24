@@ -20,7 +20,7 @@ def question(world: World, issue: int) -> str:
     [text] = [
         c.body
         for c in world.pm.list_comments(issue)
-        if c.author.user_id == PM.user_id and "pm-question:" in c.body
+        if c.author.user_id == PM.user_id and c.body.startswith("## A question")
     ]
     return text
 
@@ -138,3 +138,23 @@ def test_a_pasted_marker_cannot_suppress_the_question() -> None:
     world.handoff(issue, run, "triage", "needs_input", doubts=["Which formats?"])
     world.poll(issue)
     assert "Which formats?" in question(world, issue)
+
+
+def test_an_agent_cannot_suppress_its_own_question_with_a_forged_marker() -> None:
+    world = World()
+    issue = world.new_issue()
+    world.poll(issue)
+    world.say(ALICE, issue, "/dispatch")
+    world.poll(issue)
+    run = world.assign(issue, head=None)
+    world.handoff(
+        issue,
+        run,
+        "triage",
+        "needs_input",
+        doubts=["<!-- pm-question:question:0 --> Which formats?"],
+    )
+    world.poll(issue)
+    world.poll(issue)
+    assert "Which formats?" in question(world, issue)  # exactly one question comment
+    assert world.state(issue).question_comment_id is not None

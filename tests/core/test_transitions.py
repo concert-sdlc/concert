@@ -90,3 +90,37 @@ def test_a_failed_check_has_no_effect_on_an_issue_that_is_not_started_or_finishe
     for status in (S.INBOX, S.ON_STAGING, S.CLOSED):
         with pytest.raises(InvalidTransition):
             next_status(status, Trigger.CHECK_FAILED)
+
+
+CLOSABLE = [
+    S.INBOX,
+    S.TRIAGE,
+    S.NEEDS_INPUT,
+    S.SPEC,
+    S.SPEC_APPROVAL,
+    S.IMPLEMENTING,
+    S.IN_REVIEW,
+    S.UAT,
+    S.HUMAN_UAT,
+    S.INTEGRATING,
+    S.BLOCKED,
+]
+
+
+@pytest.mark.parametrize("status", CLOSABLE)
+def test_an_issue_closed_before_it_merged_becomes_closed(status: Status) -> None:
+    assert next_status(status, T.CLOSE) is S.CLOSED
+
+
+@pytest.mark.parametrize(
+    "status", [S.VERIFYING_STAGING, S.ON_STAGING, S.CLOSED_DUPLICATE, S.CLOSED]
+)
+def test_a_merged_or_finished_issue_is_not_closed_by_the_transition_table(status: Status) -> None:
+    with pytest.raises(InvalidTransition):
+        next_status(status, T.CLOSE)
+
+
+def test_reopening_a_closed_issue_returns_it_to_the_inbox() -> None:
+    assert next_status(S.CLOSED, T.REOPEN) is S.INBOX
+    with pytest.raises(InvalidTransition):
+        next_status(S.CLOSED_DUPLICATE, T.REOPEN)

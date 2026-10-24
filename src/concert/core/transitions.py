@@ -50,6 +50,8 @@ class Trigger(Enum):
     # revert issues (no agent: the PM opens the revert PR and dispatches CI)
     CI_GREEN = "ci_green"
     CI_FAILED_TWICE = "ci_failed_twice"
+    CLOSE = "close"  # the issue was closed on GitHub before its work merged
+    REOPEN = "reopen"
     APPROVE_REVERT = "approve_revert"
     REJECT_REVERT = "reject_revert"
 
@@ -82,6 +84,25 @@ _AGENT_STATES = frozenset(
 # exceed the budget.
 _BUDGETED_STATES = _AGENT_STATES | {_S.SPEC_APPROVAL, _S.HUMAN_UAT}
 
+# Closing is allowed until the work has merged (verifying_staging and later are unaffected).
+_CLOSABLE = (
+    _S.INBOX,
+    _S.TRIAGE,
+    _S.NEEDS_INPUT,
+    _S.SPEC,
+    _S.SPEC_APPROVAL,
+    _S.IMPLEMENTING,
+    _S.IN_REVIEW,
+    _S.UAT,
+    _S.HUMAN_UAT,
+    _S.INTEGRATING,
+    _S.BLOCKED,
+)
+_CLOSE_ROWS: dict[tuple[Status, Trigger], Status] = {
+    **{(state, _T.CLOSE): _S.CLOSED for state in _CLOSABLE},
+    (_S.CLOSED, _T.REOPEN): _S.INBOX,
+}
+
 _CODE_TABLE: dict[tuple[Status, Trigger], Status] = {
     (_S.INBOX, _T.DISPATCH): _S.TRIAGE,
     (_S.TRIAGE, _T.SPEC): _S.SPEC,
@@ -106,6 +127,7 @@ _CODE_TABLE: dict[tuple[Status, Trigger], Status] = {
     (_S.VERIFYING_STAGING, _T.VERIFY_FAILED): _S.BLOCKED,  # freeze fallback
     **{(state, _T.BUDGET_EXCEEDED): _S.BLOCKED for state in _BUDGETED_STATES},
     **{(state, _T.CHECK_FAILED): _S.BLOCKED for state in _BUDGETED_STATES},
+    **_CLOSE_ROWS,
 }
 
 # A hotfix runs the full lifecycle, but a failed verification of its own merge is never
@@ -126,6 +148,7 @@ _REVERT_TABLE: dict[tuple[Status, Trigger], Status] = {
     (_S.INTEGRATING, _T.REBASED): _S.HUMAN_UAT,  # CI re-runs, then the revert kit is re-posted
     (_S.VERIFYING_STAGING, _T.PASSED): _S.ON_STAGING,
     (_S.VERIFYING_STAGING, _T.VERIFY_FAILED): _S.BLOCKED,
+    **_CLOSE_ROWS,
 }
 
 _TABLES: dict[IssueType, dict[tuple[Status, Trigger], Status]] = {

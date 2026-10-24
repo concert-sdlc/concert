@@ -27,6 +27,13 @@ def kit_marker(kind: str, revision: str) -> str:
     return f"<!-- pm-kit:{kind}:{revision} -->"
 
 
+def has_marker(body: str, marker: str) -> bool:
+    """A comment carries a marker only as its last line, where code puts it. Text quoted from
+    an agent can never end up there (and is escaped besides)."""
+    lines = body.rstrip().splitlines()
+    return bool(lines) and lines[-1].strip() == marker
+
+
 def render_spec_kit(facts: KitFacts, spec_hash: str, summary: str) -> str:
     return "\n".join(
         [
@@ -142,7 +149,7 @@ def _advisory(summary: str) -> list[str]:
     note = ""
     if len(text) > _SUMMARY_LIMIT:
         text, note = text[:_SUMMARY_LIMIT], "> (summary truncated)"
-    quoted = [f"> {line}".rstrip() for line in text.replace("```", "'''").splitlines()]
+    quoted = [f"> {line}".rstrip() for line in _escape(text).splitlines()]
     return [
         "### Summary (advisory: written by an agent, not verified)",
         "",
@@ -176,5 +183,10 @@ def render_question(key: str, doubts: Sequence[str]) -> str:
     )
 
 
+def _escape(text: str) -> str:
+    """Agent text goes into comments as plain quoted text: no fences, no markup, no comments."""
+    return text.replace("```", "'''").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _single_line(text: str) -> str:
-    return text.replace("```", "'''").strip()
+    return _escape(text).strip()

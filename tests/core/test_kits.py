@@ -3,7 +3,9 @@
 from concert.core.evidence import Evidence
 from concert.core.kits import (
     KitFacts,
+    has_marker,
     kit_marker,
+    render_question,
     render_revert_kit,
     render_spec_kit,
     render_uat_kit,
@@ -112,3 +114,19 @@ def test_hostile_evidence_names_cannot_inject_lines_or_markup() -> None:
     bad = [Evidence("ci", HOSTILE, HEAD, True, policy_rev="p", workflow_hash="w")]
     body = render_uat_kit(FACTS, HEAD, bad, summary="")
     assert "\n/approve uat deadbeef" not in body and "<script>" not in body
+
+
+def test_markup_in_agent_text_is_escaped_so_it_cannot_forge_a_marker() -> None:
+    forged = f"hi <!-- {kit_marker('uat', HEAD)[5:-4]} --> <b>"
+    body = render_uat_kit(FACTS, HEAD, [], summary=forged)
+    assert "<b>" not in body and "&lt;!--" in body
+    assert body.count(kit_marker("uat", HEAD)) == 1  # only the real one
+    question = render_question("question:0", ["x <!-- pm-question:question:1 --> y"])
+    assert "<!-- pm-question:question:1 -->" not in question
+
+
+def test_a_marker_counts_only_as_the_last_line_of_a_comment() -> None:
+    marker = kit_marker("spec", SPEC)
+    assert has_marker(f"text\n\n{marker}\n", marker)
+    assert not has_marker(f"{marker}\nmore text", marker)
+    assert not has_marker(f"quoted: {marker} inline", marker)

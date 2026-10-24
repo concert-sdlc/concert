@@ -33,7 +33,7 @@ from concert.core.transitions import (
 DEFAULT_BUDGET = 4
 
 # Moving back to the spec or to its approval gate voids the approval.
-_UNAPPROVED_TARGETS = frozenset({Status.SPEC, Status.SPEC_APPROVAL})
+_UNAPPROVED_TARGETS = frozenset({Status.INBOX, Status.SPEC, Status.SPEC_APPROVAL})
 
 # Event kinds that are part of the log but do not change status or counters.
 _RECORD_ONLY = frozenset({"assignment", "reconciled", "admin_command"})
@@ -97,6 +97,7 @@ class IssueState:
     question_comment_id: int | None = None  # the PM's question comment, answers come after it
     questions_posted: frozenset[str] = frozenset()
     answers: tuple[str, ...] = ()  # trusted humans' answers, oldest first
+    close_noted: bool = False  # the issue was closed after its work merged; noted once
     dispatched_at: int = 0  # when the latest /dispatch was posted
     froze_queue: bool = False  # a failed staging verification froze the queue; cleared on unblock
     verify_failures: int = 0  # failed staging verifications so far, re-runs included
@@ -172,6 +173,13 @@ def _relanded(state: IssueState) -> IssueState:
     )
 
 
+def _reopened(state: IssueState) -> IssueState:
+    """A closed issue that is reopened starts over from the inbox: old approvals, evidence, PR
+    and branch no longer count, and its work happens on a new branch generation."""
+    fresh = _relanded(state)
+    return replace(fresh, reland_of=None, branch=None)
+
+
 def _reason(error: Exception) -> str:
     if isinstance(error, InvalidTransition):
         return f"invalid transition: {error}"
@@ -214,6 +222,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             moved = replace(moved, asked_from=source, question_comment_id=None)
         if trigger is Trigger.FAILED_REVERTED:
             return _relanded(moved)
+        if trigger is Trigger.REOPEN:
+            return _reopened(moved)
         if trigger is Trigger.VERIFY_FAILED:
             return replace(moved, froze_queue=True)
         return moved
@@ -273,6 +283,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         if data.get("commit_sha") is not None:
             state = replace(state, head_sha=str(data["commit_sha"]))
         return state
+    if kind == "closed_after_merge":
+        return replace(state, close_noted=True)
     if kind == "verify_rerun":
         return replace(
             state,

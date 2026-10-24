@@ -41,6 +41,7 @@ from concert.core.handoff import (
 )
 from concert.core.kits import (
     KitFacts,
+    has_marker,
     kit_marker,
     question_marker,
     render_question,
@@ -172,6 +173,9 @@ class _Poll:
         self.chain = [parse_event(event) for event in self.raw]
         if not self.chain:
             self._post([Proposed("created", {"issue_type": "code"})])
+        self._sync_closed()
+        if is_terminal(self.state.status):
+            return self._finish()
         self._create_branch()
         if self._check_branch():
             return self._finish()
@@ -189,6 +193,27 @@ class _Poll:
 
     # --- steps -----------------------------------------------------------------------------------
 
+    def _sync_closed(self) -> None:
+        """Follow the issue being closed or reopened on GitHub: close before the merge ends the
+        work, a close after the merge changes nothing (noted once), a reopen starts over."""
+        state = self.state
+        closed = self.github.get_issue(self.issue).state == "closed"
+        if not closed:
+            if state.status is Status.CLOSED:
+                self._post([self._move(Status.CLOSED, Status.INBOX, Trigger.REOPEN)])
+            return
+        if is_terminal(state.status) or state.pending_intents:
+            return  # a merge that may have happened is resolved before anything else
+        if state.merge_sha is None:
+            self._post([self._move(state.status, Status.CLOSED, Trigger.CLOSE)])
+        elif not state.close_noted:
+            self._post([Proposed("closed_after_merge", {})])
+
+    def _move(self, source: Status, target: Status, trigger: Trigger) -> Proposed:
+        return Proposed(
+            "transition", {"from": source.value, "to": target.value, "trigger": trigger.value}
+        )
+
     def _create_branch(self) -> None:
         """Entering spec creates the issue branch from the base and records its first commit. A
         re-landed issue gets a new branch whose first commit re-applies the reverted work."""
@@ -196,10 +221,11 @@ class _Poll:
         if state.branch_base is not None or state.issue_type is IssueType.REVERT:
             return
         if state.status is Status.SPEC:
-            sha = self.github.get_ref(self.branch) or self.github.create_branch(
-                self.branch, self.config.base_branch
+            name = f"pm/{self.issue}" if state.relands == 0 else f"pm/{self.issue}-r{state.relands}"
+            sha = self.github.get_ref(name) or self.github.create_branch(
+                name, self.config.base_branch
             )
-            self._post([Proposed("branch_created", {"branch": self.branch, "sha": sha})])
+            self._post([Proposed("branch_created", {"branch": name, "sha": sha})])
         elif state.status is Status.IMPLEMENTING and state.reland_of is not None:
             name = f"pm/{self.issue}-r{state.relands}"
             sha = self._reland_branch(name, state.reland_of)
@@ -439,7 +465,9 @@ class _Poll:
     def _post_question(self, key: str, doubts: list[str]) -> dict[str, int | str | None]:
         marker = question_marker(key)
         for comment in self.github.list_comments(self.issue):
-            if comment.author.user_id == self.config.pm.user_id and marker in comment.body:
+            if comment.author.user_id == self.config.pm.user_id and has_marker(
+                comment.body, marker
+            ):
                 return {"comment_id": comment.id}
         return {"comment_id": self.github.add_comment(self.issue, render_question(key, doubts)).id}
 
@@ -447,7 +475,9 @@ class _Poll:
         """Post the gate kit unless this revision's kit is already there (a crash may have hidden it)."""
         marker = kit_marker(kind, revision)
         for comment in self.github.list_comments(self.issue):
-            if comment.author.user_id == self.config.pm.user_id and marker in comment.body:
+            if comment.author.user_id == self.config.pm.user_id and has_marker(
+                comment.body, marker
+            ):
                 return {"comment_id": comment.id}
         state = self.state
         ref = state.head_sha or self.branch

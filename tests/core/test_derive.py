@@ -577,3 +577,50 @@ def test_an_answer_outside_needs_input_is_a_conflict() -> None:
     journey = Journey().add("created", {"issue_type": "code"})
     journey.add("answered", {"to": "spec", "comment_id": 1, "author_id": 1, "text": "x"})
     assert derive(journey.raw()).status is Status.BLOCKED
+
+
+# --- close and reopen ----------------------------------------------------------------------------
+
+
+def test_closing_ends_the_runs_in_flight() -> None:
+    journey = Journey().add("created", {"issue_type": "code"}).move("inbox", "triage", "dispatch")
+    journey.add(
+        "assignment",
+        {
+            "run_id": "r-1",
+            "runner": "vm-1",
+            "state": "triage",
+            "reviewer": None,
+            "head": None,
+            "issued_at": 1,
+        },
+    )
+    assert len(derive(journey.raw()).active_runs) == 1
+    journey.move("triage", "closed", "close")
+    state = derive(journey.raw())
+    assert state.status is Status.CLOSED and state.active_runs == ()
+
+
+def test_reopening_voids_the_approvals_and_starts_a_new_generation() -> None:
+    journey = to_in_review()
+    journey.add("branch_created", {"branch": "pm/1", "sha": "b0"})
+    journey.add("outcome", {"key": "open_pr", "action": "open_pr", "result": {"number": 7}})
+    journey.add("evidence", {"kind": "uat", "item": None, "head_sha": "h1", "passed": True})
+    assert derive(journey.raw()).approved_spec_rev is None  # (set below through a gate passage)
+    journey.add(
+        "gate_passage",
+        {
+            "comment_id": 3,
+            "verb": "approve",
+            "kind": "spec",
+            "arg": "x",
+            "spec_hash": "s1",
+            "created_at": 5,
+        },
+    )
+    assert derive(journey.raw()).approved_spec_rev == "s1"
+    journey.move("in_review", "closed", "close").move("closed", "inbox", "reopen")
+    state = derive(journey.raw())
+    assert state.status is Status.INBOX and state.approved_spec_rev is None
+    assert state.relands == 1 and state.branch_base is None and state.branch is None
+    assert state.pr_number is None and state.evidence == () and state.head_sha is None
