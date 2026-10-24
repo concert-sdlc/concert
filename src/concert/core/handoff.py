@@ -212,6 +212,11 @@ _EXITS: dict[RunState, dict[str, Trigger | None]] = {
 _COMMITTING = frozenset({_S.SPEC, _S.IMPLEMENTING, _S.INTEGRATING})
 
 
+def allowed_exits(state: RunState) -> frozenset[str]:
+    """The exits an agent may report for a state."""
+    return frozenset(_EXITS[state])
+
+
 def accept_handoff(
     handoff: Handoff,
     assignments: Mapping[str, Assignment],

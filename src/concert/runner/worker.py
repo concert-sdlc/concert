@@ -44,6 +44,11 @@ class AgentResult:
     doubts: tuple[str, ...] = ()
 
 
+class AgentFailure(Exception):
+    """The agent could not produce a usable result. The worker posts nothing: the lease lapses
+    and the PM retries the run on its infrastructure-retry budget."""
+
+
 class Agent(Protocol):
     def run(self, task: AgentTask) -> AgentResult: ...
 
@@ -82,7 +87,10 @@ class Worker:
         done: list[str] = []
         for run in mine:
             write_heartbeat(self.github, self.runner, [run.run_id], now)
-            self._execute(issue, run, state.spec_rev, state.approved_spec_rev)
+            try:
+                self._execute(issue, run, state.spec_rev, state.approved_spec_rev)
+            except AgentFailure:
+                continue
             done.append(run.run_id)
         return done
 

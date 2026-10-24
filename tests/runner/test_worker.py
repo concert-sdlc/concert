@@ -4,7 +4,7 @@ from collections.abc import Mapping
 
 from concert.core.transitions import Status
 from concert.github.comments import extract_handoffs
-from concert.runner.worker import AgentResult, AgentTask, Worker
+from concert.runner.worker import AgentFailure, AgentResult, AgentTask, Worker
 from tests.runner.helpers import ALICE, PM, VM1, World, spec_files
 
 
@@ -157,3 +157,15 @@ def test_someone_elses_comment_with_the_run_marker_does_not_suppress_the_run() -
     world.say(ALICE, issue, f"<!-- pm-run:{run} -->")
     agent = Scripted()
     assert worker(world, agent).run_once(issue, now=world.fake.now) == [run]
+
+
+def test_a_failed_agent_run_posts_nothing_so_the_lease_can_lapse() -> None:
+    world = World()
+    issue, _run = dispatched_with_triage_run(world)
+
+    class Failing(Scripted):
+        def run(self, task: AgentTask) -> AgentResult:
+            raise AgentFailure("timed out")
+
+    assert worker(world, Failing()).run_once(issue, now=world.fake.now) == []
+    assert handoffs(world, issue) == []
