@@ -1,0 +1,39 @@
+src/concert/core/derive.py
+  s_4aba28ccdf2cb3::t_f28c3d7711f5db 69-70,147-153,162-163,221
+src/concert/core/transitions.py
+  s_4aba28ccdf2cb3::t_c9845f37fa6519 49,108
+src/concert/github/git_facts.py
+  s_4aba28ccdf2cb3::t_a067e34ff897be 10,22-30
+src/concert/github/heartbeats.py
+  s_4aba28ccdf2cb3::t_fdd0403c1c20c0 1-49
+src/concert/runner/poll.py
+  s_4aba28ccdf2cb3::t_a1938ce7f2ab03 3-7,10,12,15,17,21-30,32-33,41,44-45,55,76-82,84-248,250-318,321-343
+tests/core/test_derive.py
+  s_4aba28ccdf2cb3::t_ed51b28b085662 305-331
+tests/core/test_transitions.py
+  s_4aba28ccdf2cb3::t_923884829d0f20 70-92
+tests/github/test_heartbeats.py
+  s_4aba28ccdf2cb3::t_ffdb3dea4658c4 1-44
+tests/runner/helpers.py
+  s_4aba28ccdf2cb3::t_b283f98dd325bb 4,7,9,15,32-37,48-49,53,62,64-77,124-131
+tests/runner/test_assignment.py
+  s_4aba28ccdf2cb3::t_96fbdafdc3812f 1-269
+tests/runner/test_poll.py
+  s_4aba28ccdf2cb3::t_3e01f2dfdc519d 19,21,23-31,186,221,223-229,251-260
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "47d14e63b1911a0839caf798a0561438338a7957",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
