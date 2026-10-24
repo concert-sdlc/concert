@@ -1,0 +1,19 @@
+tests/github/test_transport.py
+  s_4aba28ccdf2cb3::t_fe2d5bb4fddeed 36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f9ccf05c3db00b4ca4e206c3790d1939806d703b",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
