@@ -1,0 +1,33 @@
+src/concert/core/decide.py
+  s_4aba28ccdf2cb3::t_93e88f65edb84c 229
+src/concert/core/derive.py
+  s_4aba28ccdf2cb3::t_27d2c1a8d60111 96-97,281-282,324-325
+src/concert/core/effects.py
+  s_4aba28ccdf2cb3::t_b21338a262963a 53-57
+src/concert/runner/poll.py
+  s_4aba28ccdf2cb3::t_5f96d1f0865872 178,442-443,468-481
+tests/core/test_decide.py
+  s_4aba28ccdf2cb3::t_b4e87e167937a5 383
+tests/core/test_derive.py
+  s_4aba28ccdf2cb3::t_2cfd895774f488 627-647
+tests/core/test_effects.py
+  s_4aba28ccdf2cb3::t_44a7a29207b30c 86,275-287
+tests/runner/test_close.py
+  s_4aba28ccdf2cb3::t_5ce960e5a8facd 138-169
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "13753da7edf68e2a884c79bcc4111503aada62fb",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
