@@ -1,0 +1,160 @@
+"""derive(): fold trusted pm-events into the issue state (design: "Event log")."""
+
+import json
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+from concert.core.counters import AgentState
+from concert.core.derive import derive
+from concert.core.events import Event, append_event
+from concert.core.transitions import IssueType, Status
+
+FIXTURES = Path(__file__).parent.parent / "fixtures" / "events"
+
+Raw = Mapping[str, Any]
+
+
+class Journey:
+    """Builds a valid chain event by event."""
+
+    def __init__(self) -> None:
+        self.events: list[Event] = []
+
+    def add(self, kind: str, data: Mapping[str, Any], epoch: int = 1) -> "Journey":
+        self.events.append(append_event(self.events, epoch=epoch, kind=kind, data=data))
+        return self
+
+    def move(self, src: str, dst: str, trigger: str, epoch: int = 1) -> "Journey":
+        return self.add("transition", {"from": src, "to": dst, "trigger": trigger}, epoch)
+
+    def raw(self) -> list[dict[str, Any]]:
+        return [e.to_dict() for e in self.events]
+
+
+def to_in_review() -> Journey:
+    return (
+        Journey()
+        .add("created", {"issue_type": "code"})
+        .move("inbox", "triage", "dispatch")
+        .move("triage", "spec", "spec")
+        .move("spec", "spec_approval", "ready_for_approval")
+        .move("spec_approval", "implementing", "approve_spec")
+        .move("implementing", "in_review", "done")
+    )
+
+
+def test_an_issue_with_no_events_is_a_new_code_issue_in_inbox() -> None:
+    state = derive([])
+    assert state.status is Status.INBOX
+    assert state.issue_type is IssueType.CODE
+    assert state.blocked_reason is None
+    assert state.last_seq == 0
+
+
+def test_transitions_fold_into_the_current_status() -> None:
+    state = derive(to_in_review().raw())
+    assert state.status is Status.IN_REVIEW
+    assert state.last_seq == 6
+    assert state.blocked_reason is None
+
+
+def test_a_revert_issue_starts_in_the_pm_only_implementing_state() -> None:
+    state = derive(Journey().add("created", {"issue_type": "revert"}).raw())
+    assert state.issue_type is IssueType.REVERT
+    assert state.status is Status.IMPLEMENTING
+
+
+def test_counter_events_charge_and_reset() -> None:
+    journey = to_in_review().add("counter_charged", {"cause": "changes_needed"})
+    journey.move("in_review", "implementing", "changes_needed")
+    state = derive(journey.raw())
+    assert state.status is Status.IMPLEMENTING
+    assert state.counters.used(AgentState.IMPLEMENTING) == 1
+
+    reset = journey.add("counter_reset", {"state": "implementing"})
+    assert derive(reset.raw()).counters.used(AgentState.IMPLEMENTING) == 0
+
+
+def test_exceeding_the_budget_blocks_the_issue() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("counter_charged", {"cause": "changes_needed"})
+    journey.add("counter_charged", {"cause": "changes_needed"})
+    state = derive(journey.raw(), budget=1)
+    assert state.status is Status.BLOCKED
+    assert state.blocked_reason == "retry budget exceeded for implementing"
+
+
+def test_the_golden_journey_derives_to_implementing_with_one_charge() -> None:
+    raw = json.loads((FIXTURES / "v1_journey.json").read_text())
+    state = derive(raw["events"])
+    assert state.status is Status.IMPLEMENTING
+    assert state.counters.used(AgentState.IMPLEMENTING) == 1
+    assert state.last_seq == 8
+
+
+def test_a_deleted_event_blocks_the_issue_and_shows_the_gap() -> None:
+    raw = to_in_review().raw()
+    del raw[2]
+    state = derive(raw)
+    assert state.status is Status.BLOCKED
+    assert state.blocked_reason is not None
+    assert "seq 3" in state.blocked_reason
+
+
+def test_a_rewritten_event_blocks_the_issue() -> None:
+    raw = to_in_review().raw()
+    raw[2] = raw[2] | {"data": {"from": "triage", "to": "implementing", "trigger": "spec"}}
+    state = derive(raw)
+    assert state.status is Status.BLOCKED
+    assert state.blocked_reason is not None
+    assert "hash break" in state.blocked_reason
+
+
+def test_an_unknown_newer_schema_blocks_with_runner_too_old() -> None:
+    raw = to_in_review().raw()
+    raw[3] = raw[3] | {"schema": 99}
+    state = derive(raw)
+    assert state.status is Status.BLOCKED
+    assert state.blocked_reason is not None
+    assert "runner too old" in state.blocked_reason
+
+
+def test_a_malformed_event_blocks_the_issue() -> None:
+    raw = to_in_review().raw()
+    del raw[1]["kind"]
+    state = derive(raw)
+    assert state.status is Status.BLOCKED
+    assert state.blocked_reason is not None
+    assert "malformed" in state.blocked_reason
+
+
+def test_a_transition_from_the_wrong_status_is_a_conflict() -> None:
+    journey = to_in_review().move("triage", "spec", "spec")  # the issue is in in_review
+    state = derive(journey.raw())
+    assert state.status is Status.BLOCKED
+    assert state.blocked_reason is not None
+    assert "conflict" in state.blocked_reason
+
+
+def test_a_transition_the_table_does_not_allow_blocks_the_issue() -> None:
+    journey = to_in_review().move("in_review", "integrating", "approve_uat")
+    state = derive(journey.raw())
+    assert state.status is Status.BLOCKED
+    assert state.blocked_reason is not None
+    assert "invalid transition" in state.blocked_reason
+
+
+def test_a_stale_epoch_event_is_ignored() -> None:
+    journey = Journey().add("created", {"issue_type": "code"}, epoch=2)
+    journey.move("inbox", "triage", "dispatch", epoch=2)
+    journey.move("triage", "spec", "spec", epoch=1)  # posted by a stale coordinator
+    state = derive(journey.raw())
+    assert state.status is Status.TRIAGE
+    assert state.blocked_reason is None
+    assert state.last_seq == 3
+
+
+def test_derive_is_deterministic() -> None:
+    raw = to_in_review().raw()
+    assert derive(raw) == derive(raw)

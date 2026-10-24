@@ -1,0 +1,107 @@
+{
+  "comment": "Golden v1 event chain. Hashes were computed independently with hashlib; never regenerate them to make a test pass.",
+  "events": [
+    {
+      "schema": 1,
+      "seq": 1,
+      "prev": "",
+      "epoch": 1,
+      "kind": "created",
+      "data": {
+        "issue_type": "code"
+      }
+    },
+    {
+      "schema": 1,
+      "seq": 2,
+      "prev": "a812863b101af63d40238fcc78ebc42dcf08693ab6c91010f2af395c9473c4f0",
+      "epoch": 1,
+      "kind": "transition",
+      "data": {
+        "from": "inbox",
+        "to": "triage",
+        "trigger": "dispatch"
+      }
+    },
+    {
+      "schema": 1,
+      "seq": 3,
+      "prev": "74223192651306b13af8371b85323aa2cf4b16f6fc4c4c58d1bc4ac4ca284f32",
+      "epoch": 1,
+      "kind": "transition",
+      "data": {
+        "from": "triage",
+        "to": "spec",
+        "trigger": "spec"
+      }
+    },
+    {
+      "schema": 1,
+      "seq": 4,
+      "prev": "22d50aabfebcc0a67a94259c5b5b6add3ea555c9fe7c95018e903f4856dac724",
+      "epoch": 1,
+      "kind": "transition",
+      "data": {
+        "from": "spec",
+        "to": "spec_approval",
+        "trigger": "ready_for_approval"
+      }
+    },
+    {
+      "schema": 1,
+      "seq": 5,
+      "prev": "1c51a95cd61c1dad427cb6a174b49ad31d9938edc965e84bc0dc92a9f3a4a753",
+      "epoch": 1,
+      "kind": "transition",
+      "data": {
+        "from": "spec_approval",
+        "to": "implementing",
+        "trigger": "approve_spec"
+      }
+    },
+    {
+      "schema": 1,
+      "seq": 6,
+      "prev": "f36e3dab37a9f93fc225890cc1b75d8ad81e4c9d8572474a13e1b57688f3dd2a",
+      "epoch": 1,
+      "kind": "transition",
+      "data": {
+        "from": "implementing",
+        "to": "in_review",
+        "trigger": "done"
+      }
+    },
+    {
+      "schema": 1,
+      "seq": 7,
+      "prev": "5c198d1e5fe3d35826c4b840457e66ee26a42fdabb1552eda25b373838ac569c",
+      "epoch": 1,
+      "kind": "counter_charged",
+      "data": {
+        "cause": "changes_needed"
+      }
+    },
+    {
+      "schema": 1,
+      "seq": 8,
+      "prev": "db41764d0768355d3060da414a166ab485518eb49de84ef163c00be2b4d3d4f6",
+      "epoch": 1,
+      "kind": "transition",
+      "data": {
+        "from": "in_review",
+        "to": "implementing",
+        "trigger": "changes_needed"
+      }
+    }
+  ],
+  "hashes": [
+    "a812863b101af63d40238fcc78ebc42dcf08693ab6c91010f2af395c9473c4f0",
+    "74223192651306b13af8371b85323aa2cf4b16f6fc4c4c58d1bc4ac4ca284f32",
+    "22d50aabfebcc0a67a94259c5b5b6add3ea555c9fe7c95018e903f4856dac724",
+    "1c51a95cd61c1dad427cb6a174b49ad31d9938edc965e84bc0dc92a9f3a4a753",
+    "f36e3dab37a9f93fc225890cc1b75d8ad81e4c9d8572474a13e1b57688f3dd2a",
+    "5c198d1e5fe3d35826c4b840457e66ee26a42fdabb1552eda25b373838ac569c",
+    "db41764d0768355d3060da414a166ab485518eb49de84ef163c00be2b4d3d4f6",
+    "4ee69489a7731118544363e73ae0ee071fec2738eb7da01219fff4f36646b617"
+  ]
+}
