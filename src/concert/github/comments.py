@@ -99,6 +99,18 @@ def assignments_from(records: Sequence[EventRecord]) -> dict[str, Assignment]:
     return found
 
 
+def assignment_heads(records: Sequence[EventRecord]) -> dict[str, str | None]:
+    """run_id -> the branch head when the run started (None when the run has no branch yet)."""
+    found: dict[str, str | None] = {}
+    for record in records:
+        if record.event.get("kind") == "assignment":
+            data = cast("dict[str, Any]", record.event.get("data", {}))
+            run_id, head = data.get("run_id"), data.get("head")
+            if isinstance(run_id, str):
+                found[run_id] = head if isinstance(head, str) else None
+    return found
+
+
 def lease_expiry_comment_ids(records: Sequence[EventRecord]) -> dict[str, int]:
     """run_id -> id of the PM comment that recorded `lease_expired` (comment ids are ordered)."""
     found: dict[str, int] = {}
@@ -174,6 +186,8 @@ class CommandComment:
     command: Command
     actor: Actor
     facts: CommentFacts
+    body: str
+    created_at: int
 
 
 def extract_commands(
@@ -193,7 +207,12 @@ def extract_commands(
         )
         found.append(
             CommandComment(
-                comment.id, command, actor, CommentFacts(edited=comment.edited_at is not None)
+                comment.id,
+                command,
+                actor,
+                CommentFacts(edited=comment.edited_at is not None),
+                comment.body,
+                comment.created_at,
             )
         )
     return found
