@@ -325,3 +325,46 @@ def test_needs_prerequisite_wins_over_findings_and_nothing_is_charged() -> None:
     proposals = decide(log.state(), both, [])
     assert kinds(proposals) == ["handoff_accepted", "handoff_accepted"]
     assert log.apply(proposals).state().counters.used(AgentState.IMPLEMENTING) == 0
+
+
+# --- facts the poll loop needs ----------------------------------------------------------------
+
+
+def test_an_accepted_handoff_event_carries_the_state_commit_and_artifact() -> None:
+    log = Log().move("inbox", "triage", "dispatch").move("triage", "spec", "spec")
+    item = handoff("r-2", "spec", "ready_for_approval")
+    committing = AcceptedHandoff(
+        parse_handoff(
+            {
+                "schema": 1,
+                "state": "spec",
+                "run_id": "r-2",
+                "runner": "vm-1",
+                "exit": "ready_for_approval",
+                "commit_sha": "aaa1111",
+                "artifact_rev": "spec1",
+            }
+        ),
+        Accepted(trigger=Trigger.READY_FOR_APPROVAL),
+        item.comment_id,
+    )
+    [accepted, _move] = decide(log.state(), [committing], [])
+    assert accepted.data == {
+        "run_id": "r-2",
+        "state": "spec",
+        "commit_sha": "aaa1111",
+        "artifact_rev": "spec1",
+    }
+    state = log.apply(decide(log.state(), [committing], [])).state()
+    assert state.spec_rev == "spec1" and state.head_sha == "aaa1111"
+
+
+def test_approving_the_spec_records_the_hash_that_was_approved() -> None:
+    log = log_at("spec_approval")
+    log.add(
+        "handoff_accepted",
+        {"run_id": "r-2", "state": "spec", "commit_sha": "aaa1111", "artifact_rev": "spec1"},
+    )
+    proposals = decide(log.state(), [], [command(7, "approve", "spec", "spec1")])
+    assert proposals[0].data["spec_hash"] == "spec1"
+    assert log.apply(proposals).state().approved_spec_rev == "spec1"

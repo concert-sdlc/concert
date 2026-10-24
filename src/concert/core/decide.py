@@ -119,7 +119,16 @@ def _review_round(state: IssueState, pending: Sequence[AcceptedHandoff]) -> list
 
 
 def _accepted(item: AcceptedHandoff) -> Proposed:
-    return Proposed("handoff_accepted", {"run_id": item.handoff.run_id})
+    handoff = item.handoff
+    return Proposed(
+        "handoff_accepted",
+        {
+            "run_id": handoff.run_id,
+            "state": handoff.state.value,
+            "commit_sha": handoff.commit_sha,
+            "artifact_rev": handoff.artifact_rev,
+        },
+    )
 
 
 # --- commands --------------------------------------------------------------------------------
@@ -129,7 +138,7 @@ def _from_commands(state: IssueState, commands: Sequence[ValidCommand]) -> list[
     for item in sorted(commands, key=lambda c: c.comment_id):
         if item.comment_id in state.consumed_commands:
             continue
-        passage = Proposed("gate_passage", _snapshot(item))
+        passage = Proposed("gate_passage", _snapshot(item, state))
         if state.status is Status.BLOCKED and item.command.verb == "unblock":
             return [passage, *_unblock_events(item.command.arg.strip())]
         key = (state.status, state.issue_type, item.command.verb, item.command.kind)
@@ -139,9 +148,11 @@ def _from_commands(state: IssueState, commands: Sequence[ValidCommand]) -> list[
     return []
 
 
-def _snapshot(item: ValidCommand) -> dict[str, Any]:
-    """Gate-passage events snapshot the command they consumed."""
-    return {
+def _snapshot(item: ValidCommand, state: IssueState) -> dict[str, Any]:
+    """Gate-passage events snapshot the command they consumed. Approving the spec also
+    records the full spec hash that was approved (the command may carry only a prefix)."""
+    approved = {"spec_hash": state.spec_rev} if _is_spec_approval(item) else {}
+    return approved | {
         "comment_id": item.comment_id,
         "author_id": item.actor.user_id,
         "author_login": item.actor.login,
@@ -151,6 +162,10 @@ def _snapshot(item: ValidCommand) -> dict[str, Any]:
         "body": item.body,
         "created_at": item.created_at,
     }
+
+
+def _is_spec_approval(item: ValidCommand) -> bool:
+    return item.command.verb == "approve" and item.command.kind == "spec"
 
 
 def _unblock_events(target: str) -> list[Proposed]:

@@ -188,3 +188,52 @@ def test_an_unblock_event_on_an_issue_that_is_not_blocked_is_a_conflict() -> Non
     state = derive(journey.raw())
     assert state.status is Status.BLOCKED
     assert state.blocked_reason is not None and "conflict" in state.blocked_reason
+
+
+# --- spec revision, approved spec and head --------------------------------------------------------
+
+
+def test_an_accepted_spec_run_sets_the_current_spec_rev_and_head() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add(
+        "handoff_accepted",
+        {"run_id": "r-2", "state": "spec", "commit_sha": "aaa1111", "artifact_rev": "spec1"},
+    )
+    state = derive(journey.raw())
+    assert state.spec_rev == "spec1"
+    assert state.head_sha == "aaa1111"
+    assert state.approved_spec_rev is None
+
+
+def test_a_run_that_reports_no_commit_leaves_the_head_alone() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add(
+        "handoff_accepted",
+        {"run_id": "r-1", "state": "triage", "commit_sha": None, "artifact_rev": None},
+    )
+    assert derive(journey.raw()).head_sha is None
+
+
+def test_approving_the_spec_records_the_approved_hash() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add(
+        "gate_passage", {"comment_id": 4, "verb": "approve", "kind": "spec", "spec_hash": "spec1"}
+    )
+    assert derive(journey.raw()).approved_spec_rev == "spec1"
+
+
+def test_a_returned_spec_loses_its_approval() -> None:
+    journey = (
+        Journey()
+        .add("created", {"issue_type": "code"})
+        .move("inbox", "triage", "dispatch")
+        .move("triage", "spec", "spec")
+        .move("spec", "spec_approval", "ready_for_approval")
+        .add(
+            "gate_passage",
+            {"comment_id": 4, "verb": "approve", "kind": "spec", "spec_hash": "spec1"},
+        )
+        .move("spec_approval", "implementing", "approve_spec")
+        .move("implementing", "spec_approval", "spec_drift")
+    )
+    assert derive(journey.raw()).approved_spec_rev is None

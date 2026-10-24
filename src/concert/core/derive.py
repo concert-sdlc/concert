@@ -30,6 +30,9 @@ from concert.core.transitions import (
 
 DEFAULT_BUDGET = 4
 
+# Moving back to the spec or to its approval gate voids the approval.
+_UNAPPROVED_TARGETS = frozenset({Status.SPEC, Status.SPEC_APPROVAL})
+
 # Event kinds that are part of the log but do not change status or counters.
 _RECORD_ONLY = frozenset({"assignment", "intent", "outcome", "reconciled", "admin_command"})
 
@@ -43,6 +46,9 @@ class IssueState:
     last_seq: int = 0
     accepted_runs: frozenset[str] = frozenset()  # run_ids whose handoff the PM accepted
     consumed_commands: frozenset[int] = frozenset()  # comment ids of commands that passed a gate
+    spec_rev: str | None = None  # spec hash of the latest accepted spec run
+    approved_spec_rev: str | None = None  # the spec hash a human approved, until the spec changes
+    head_sha: str | None = None  # the commit of the latest accepted committing run
 
 
 class _Conflict(Exception):
@@ -106,7 +112,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
                 f"conflict at seq {event.seq}: {trigger.value} from {source.value} leads to "
                 f"{derived.value}, the event says {target.value}"
             )
-        return replace(state, status=target)
+        approved = None if target in _UNAPPROVED_TARGETS else state.approved_spec_rev
+        return replace(state, status=target, approved_spec_rev=approved)
     if kind == "counter_charged":
         counters, outcome = state.counters.charge(Cause(event.data["cause"]))
         if outcome is Outcome.BLOCKED:
@@ -116,11 +123,21 @@ def _apply(state: IssueState, event: Event) -> IssueState:
     if kind == "counter_reset":
         return replace(state, counters=state.counters.reset(AgentState(event.data["state"])))
     if kind == "handoff_accepted":
-        return replace(state, accepted_runs=state.accepted_runs | {str(event.data["run_id"])})
+        data = event.data
+        state = replace(state, accepted_runs=state.accepted_runs | {str(data["run_id"])})
+        if data.get("state") == "spec" and data.get("artifact_rev") is not None:
+            state = replace(state, spec_rev=str(data["artifact_rev"]))
+        if data.get("commit_sha") is not None:
+            state = replace(state, head_sha=str(data["commit_sha"]))
+        return state
     if kind == "gate_passage":
-        return replace(
-            state, consumed_commands=state.consumed_commands | {int(event.data["comment_id"])}
+        data = event.data
+        state = replace(
+            state, consumed_commands=state.consumed_commands | {int(data["comment_id"])}
         )
+        if data.get("verb") == "approve" and data.get("kind") == "spec" and data.get("spec_hash"):
+            state = replace(state, approved_spec_rev=str(data["spec_hash"]))
+        return state
     if kind == "unblocked":
         if state.status is not Status.BLOCKED:
             raise _Conflict(
