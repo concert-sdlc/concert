@@ -111,6 +111,8 @@ def _from_handoffs(state: IssueState, handoffs: Sequence[AcceptedHandoff]) -> li
     if state.status is Status.IN_REVIEW:
         return _review_round(state, pending)
     first = pending[0]
+    if state.status is Status.INTEGRATING and first.decision.trigger is Trigger.READY_TO_MERGE:
+        return [_accepted(first)]  # the issue moves on once the PM has merged
     return [
         _accepted(first),
         *_run_evidence(first),
@@ -283,3 +285,10 @@ def plan_integration(state: IssueState, policy: GatePolicy, at_queue_head: bool)
         Trigger.APPROVE_REVERT if state.issue_type is IssueType.REVERT else Trigger.APPROVE_UAT
     )
     return _trigger_events(state, trigger)
+
+
+def plan_merged(state: IssueState) -> list[Proposed]:
+    """After the PM merged the PR, the issue moves on to staging verification."""
+    if state.status is not Status.INTEGRATING or state.merge_sha is None:
+        return []
+    return _trigger_events(state, Trigger.READY_TO_MERGE)

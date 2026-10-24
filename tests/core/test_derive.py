@@ -401,3 +401,20 @@ def test_announcing_the_same_intent_twice_leaves_one_pending() -> None:
     journey.add("intent", {"key": "open_pr", "action": "open_pr", "head": "pm/1"})
     journey.add("intent", {"key": "open_pr", "action": "open_pr", "head": "pm/1"})
     assert len(derive(journey.raw()).pending_intents) == 1
+
+
+def test_a_merge_outcome_records_the_merge_commit() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("intent", {"key": "merge", "action": "merge", "number": 7, "expected_head": "h1"})
+    assert derive(journey.raw()).merge_sha is None
+    journey.add("outcome", {"key": "merge", "result": {"sha": "m1"}})
+    state = derive(journey.raw())
+    assert state.merge_sha == "m1" and state.pending_intents == ()
+
+
+def test_a_failed_merge_outcome_resolves_the_intent_without_a_merge() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("intent", {"key": "merge", "action": "merge", "number": 7, "expected_head": "h1"})
+    journey.add("outcome", {"key": "merge", "result": {"error": "stale head"}})
+    state = derive(journey.raw())
+    assert state.merge_sha is None and state.pending_intents == ()

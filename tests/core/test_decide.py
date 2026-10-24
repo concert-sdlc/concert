@@ -6,7 +6,14 @@ from typing import Any
 
 from concert.core.commands import Actor, Command, Role
 from concert.core.counters import AgentState
-from concert.core.decide import AcceptedHandoff, Proposed, ValidCommand, decide, plan_integration
+from concert.core.decide import (
+    AcceptedHandoff,
+    Proposed,
+    ValidCommand,
+    decide,
+    plan_integration,
+    plan_merged,
+)
 from concert.core.derive import IssueState, derive
 from concert.core.events import Event, append_event
 from concert.core.evidence import GatePolicy
@@ -586,3 +593,53 @@ def test_an_approval_before_any_head_exists_is_not_recorded() -> None:
     log = log_at("human_uat")
     assert log.state().head_sha is None
     assert decide(log.state(), [], [command(20, "approve", "uat", "h1")]) == []
+
+
+# --- the merge ------------------------------------------------------------------------------------
+
+
+def integrating_log() -> Log:
+    log = ready_log()
+    log.move("human_uat", "integrating", "approve_uat")
+    return log
+
+
+def integrating_handoff(exit_name: str, trigger: Trigger) -> AcceptedHandoff:
+    base = head_handoff("r-9", "integrating", exit_name, HEAD)
+    return AcceptedHandoff(base.handoff, Accepted(trigger=trigger), base.comment_id)
+
+
+def test_ready_to_merge_is_accepted_but_the_issue_waits_for_the_merge() -> None:
+    log = integrating_log()
+    proposals = decide(
+        log.state(), [integrating_handoff("ready_to_merge", Trigger.READY_TO_MERGE)], []
+    )
+    assert kinds(proposals) == ["handoff_accepted"]
+    assert log.apply(proposals).state().status is Status.INTEGRATING
+
+
+def test_a_rebase_still_returns_the_issue_to_review_at_once() -> None:
+    log = integrating_log()
+    proposals = decide(log.state(), [integrating_handoff("rebased", Trigger.REBASED)], [])
+    assert kinds(proposals) == ["handoff_accepted", "transition"]
+    assert log.apply(proposals).state().status is Status.IN_REVIEW
+
+
+def test_a_merged_issue_moves_to_verifying_staging() -> None:
+    log = integrating_log()
+    log.add("outcome", {"key": "merge", "action": "merge", "result": {"sha": "m1"}})
+    proposals = plan_merged(log.state())
+    assert kinds(proposals) == ["transition"]
+    assert proposals[0].data["trigger"] == "ready_to_merge"
+    assert log.apply(proposals).state().status is Status.VERIFYING_STAGING
+
+
+def test_an_issue_that_has_not_merged_stays_in_integrating() -> None:
+    assert plan_merged(integrating_log().state()) == []
+
+
+def test_only_integrating_issues_move_after_a_merge() -> None:
+    log = integrating_log()
+    log.add("outcome", {"key": "merge", "action": "merge", "result": {"sha": "m1"}})
+    log.move("integrating", "verifying_staging", "ready_to_merge")
+    assert plan_merged(log.state()) == []

@@ -37,7 +37,10 @@ class Effect:
     resumed: bool  # true when the intent is already in the log
 
 
-def plan_effect(state: IssueState, issue: int, base_branch: str) -> Effect | None:
+def plan_effect(
+    state: IssueState, issue: int, base_branch: str, gate_ready: bool = False
+) -> Effect | None:
+    """`gate_ready`: every merge requirement holds on the current head (the caller evaluates it)."""
     if state.pending_intents:
         pending = state.pending_intents[0]
         return Effect(pending.key, pending.action, pending.data, resumed=True)
@@ -53,4 +56,14 @@ def plan_effect(state: IssueState, issue: int, base_branch: str) -> Effect | Non
         return Effect("open_pr", "open_pr", data, resumed=False)
     if state.pr_number is not None and not state.pr_ready and state.status in _READY_STATES:
         return Effect("ready", "mark_ready", {"number": state.pr_number}, resumed=False)
+    if (
+        state.status is Status.INTEGRATING
+        and gate_ready
+        and state.pr_number is not None
+        and state.head_sha is not None
+        and state.merge_sha is None
+        and state.settled_runs  # the integration run reported ready_to_merge
+    ):
+        data = {"number": state.pr_number, "expected_head": state.head_sha}
+        return Effect("merge", "merge", data, resumed=False)
     return None

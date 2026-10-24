@@ -69,6 +69,7 @@ class PullRequest:
     title: str
     draft: bool
     state: str  # "open", "merged" or "closed"
+    merge_sha: str | None = None  # the merge commit once merged
 
 
 class GitHubApi(Protocol):

@@ -16,11 +16,18 @@ from concert.core.assign import Heartbeat, RunnerInfo, expire_leases, plan_assig
 from concert.core.ci import plan_ci_evidence
 from concert.core.commands import IssueContext, Role, Valid, validate_command
 from concert.core.commit_binding import ForeignCommits, check_commit_binding
-from concert.core.decide import AcceptedHandoff, Proposed, ValidCommand, decide, plan_integration
+from concert.core.decide import (
+    AcceptedHandoff,
+    Proposed,
+    ValidCommand,
+    decide,
+    plan_integration,
+    plan_merged,
+)
 from concert.core.derive import IssueState, derive
 from concert.core.effects import Effect, plan_effect
 from concert.core.events import Event, append_event, parse_event
-from concert.core.evidence import GatePolicy
+from concert.core.evidence import GatePolicy, Ready, evaluate_gate
 from concert.core.handoff import (
     Accepted,
     Handoff,
@@ -30,7 +37,7 @@ from concert.core.handoff import (
     accept_handoff,
 )
 from concert.core.transitions import IssueType, Status, Trigger, is_terminal
-from concert.github.api import Comment, GitHubApi, Identity
+from concert.github.api import Comment, Conflict, GitHubApi, Identity
 from concert.github.comments import (
     EventRecord,
     HandoffComment,
@@ -149,9 +156,10 @@ class _Poll:
             return self._finish()
         self._intake()
         self._create_branch()  # intake may have moved the issue into spec
-        self._effects()
         self._evidence()
+        self._effects()
         self._integrate()
+        self._after_merge()
         self._runs()
         return self._finish()
 
@@ -280,7 +288,9 @@ class _Poll:
         """Perform the side effects the state calls for: announce, act, record the outcome.
         Every action is idempotent, so a pending intent left by a crash is simply run again."""
         for _ in range(4):  # a bound, never a loop on a failing effect
-            effect = plan_effect(self.state, self.issue, self.config.base_branch)
+            effect = plan_effect(
+                self.state, self.issue, self.config.base_branch, gate_ready=self._gate_ready()
+            )
             if effect is None:
                 return
             if not effect.resumed:
@@ -297,8 +307,11 @@ class _Poll:
                 self._block(str(error))
                 return
             self._post([Proposed("outcome", {"key": effect.key, "result": result})])
+            if "error" in result:
+                self._block(f"{effect.action} failed: {result['error']}")
+                return
 
-    def _perform(self, effect: Effect) -> dict[str, int]:
+    def _perform(self, effect: Effect) -> dict[str, int | str | None]:
         data = effect.data
         if effect.action == "open_pr":
             existing = self.github.find_pr(str(data["head"]))
@@ -310,7 +323,39 @@ class _Poll:
             number = int(data["number"])
             self.github.mark_ready(number)
             return {"number": number}
+        if effect.action == "merge":
+            return self._merge(int(data["number"]), str(data["expected_head"]))
         raise ValueError(f"unknown side effect {effect.action!r}")
+
+    def _merge(self, number: int, expected_head: str) -> dict[str, int | str | None]:
+        """Merge only if the PR is still open at the expected head; a merge a crash hid is found."""
+        pr = self.github.get_pr(number)
+        if pr.state == "merged":
+            if pr.merge_sha is None:
+                return {"error": f"pull request #{number} is merged with no merge commit"}
+            return {"sha": pr.merge_sha}
+        try:
+            return {"sha": self.github.merge_pr(number, expected_head)}
+        except Conflict as error:  # includes StaleHead
+            return {"error": str(error)}
+
+    def _gate_policy(self) -> GatePolicy | None:
+        policy = self.config.gate_policy
+        if policy is None:
+            return None
+        is_revert = self.state.issue_type is IssueType.REVERT
+        return replace(policy, issue_type=self.state.issue_type, require_reviews=not is_revert)
+
+    def _gate_ready(self) -> bool:
+        policy = self._gate_policy()
+        if policy is None or self.state.head_sha is None:
+            return False
+        return isinstance(evaluate_gate(self.state.head_sha, self.state.evidence, policy), Ready)
+
+    def _after_merge(self) -> None:
+        planned = plan_merged(self.state)
+        if planned:
+            self._post(planned)
 
     def _evidence(self) -> None:
         """Record finished CI results for the current head (needs a gate policy)."""
@@ -325,11 +370,9 @@ class _Poll:
             self._post(planned)
 
     def _integrate(self) -> None:
-        policy = self.config.gate_policy
+        policy = self._gate_policy()
         if policy is None:
             return
-        is_revert = self.state.issue_type is IssueType.REVERT
-        policy = replace(policy, issue_type=self.state.issue_type, require_reviews=not is_revert)
         planned = plan_integration(self.state, policy, self.at_queue_head)
         if planned:
             self._post(planned)

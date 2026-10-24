@@ -81,6 +81,7 @@ class IssueState:
     pending_intents: tuple[Intent, ...] = ()
     pr_number: int | None = None
     pr_ready: bool = False
+    merge_sha: str | None = None  # the merge commit on the base branch, once the PM merged
     evidence: tuple[Evidence, ...] = ()  # results and approvals, in order, each bound to a head
 
 
@@ -242,6 +243,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             return replace(state, pr_number=int(result["number"]))
         if action == "mark_ready":
             return replace(state, pr_ready=True)
+        if action == "merge" and result.get("sha"):
+            return replace(state, merge_sha=str(result["sha"]))
         return state
     if kind == "evidence":
         data = event.data

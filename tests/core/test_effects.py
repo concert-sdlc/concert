@@ -87,3 +87,47 @@ def test_the_pr_is_marked_ready_from_review_onwards(status: Status) -> None:
 def test_a_finished_issue_needs_no_effects(status: Status) -> None:
     assert plan_effect(replace(BRANCHED, status=status), 4, "staging") is None
     assert plan_effect(replace(BRANCHED, status=status, pr_number=7), 4, "staging") is None
+
+
+# --- the merge ------------------------------------------------------------------------------------
+
+READY_TO_MERGE = replace(
+    BRANCHED,
+    status=Status.INTEGRATING,
+    pr_number=7,
+    pr_ready=True,
+    head_sha="h1",
+    settled_runs=frozenset({"r-9"}),
+)
+
+
+def test_a_merge_is_planned_once_the_integration_run_is_done_and_the_gate_holds() -> None:
+    effect = plan_effect(READY_TO_MERGE, 4, "staging", gate_ready=True)
+    assert effect is not None
+    assert (effect.key, effect.action) == ("merge", "merge")
+    assert dict(effect.data) == {"number": 7, "expected_head": "h1"}
+
+
+def test_no_merge_is_planned_while_the_gate_does_not_hold() -> None:
+    assert plan_effect(READY_TO_MERGE, 4, "staging", gate_ready=False) is None
+
+
+def test_no_merge_is_planned_before_the_integration_run_reports() -> None:
+    state = replace(READY_TO_MERGE, settled_runs=frozenset())
+    assert plan_effect(state, 4, "staging", gate_ready=True) is None
+
+
+def test_no_merge_is_planned_twice() -> None:
+    state = replace(READY_TO_MERGE, merge_sha="m1")
+    assert plan_effect(state, 4, "staging", gate_ready=True) is None
+
+
+def test_no_merge_is_planned_outside_integrating() -> None:
+    state = replace(READY_TO_MERGE, status=Status.HUMAN_UAT)
+    assert plan_effect(state, 4, "staging", gate_ready=True) is None
+
+
+def test_no_merge_is_planned_without_a_ready_pr() -> None:
+    state = replace(READY_TO_MERGE, pr_ready=False)
+    effect = plan_effect(state, 4, "staging", gate_ready=True)
+    assert effect is not None and effect.action == "mark_ready"

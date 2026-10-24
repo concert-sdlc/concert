@@ -317,6 +317,6 @@ class FakeClient:
         sha = self.fake.new_commit(
             pr.base, (base, head), f"Merge #{number}", self.actor.login, self.actor.login, merged
         )
-        record.pr = replace(pr, state="merged")
+        record.pr = replace(pr, state="merged", merge_sha=sha)
         record.merged_sha = sha
         return sha
