@@ -14,10 +14,11 @@ from typing import Protocol
 
 from concert.core.assign import Heartbeat, RunnerInfo, expire_leases, plan_assignments
 from concert.core.ci import plan_ci_evidence, plan_review_evidence
-from concert.core.commands import IssueContext, Role, Valid, validate_command
+from concert.core.commands import IssueContext, Role, Valid, parse_command, validate_command
 from concert.core.commit_binding import ForeignCommits, check_commit_binding
 from concert.core.decide import (
     AcceptedHandoff,
+    Answer,
     Proposed,
     ValidCommand,
     decide,
@@ -38,7 +39,14 @@ from concert.core.handoff import (
     RunState,
     accept_handoff,
 )
-from concert.core.kits import KitFacts, kit_marker, render_spec_kit, render_uat_kit
+from concert.core.kits import (
+    KitFacts,
+    kit_marker,
+    question_marker,
+    render_question,
+    render_spec_kit,
+    render_uat_kit,
+)
 from concert.core.paths import changed_paths, matches_any
 from concert.core.transitions import IssueType, Status, Trigger, is_terminal
 from concert.github.api import Comment, Conflict, GitHubApi, Identity
@@ -272,10 +280,39 @@ class _Poll:
             return
 
         valid = self._valid_commands(all_comments)
-        proposals = decide(state, accepted, valid, self.config.verify_reruns)
+        proposals = decide(
+            state, accepted, valid, self.config.verify_reruns, self._answers(all_comments)
+        )
         if proposals:
             self._post(proposals)
             self._check_branch()
+
+    def _answers(self, comments: Sequence[Comment]) -> list[Answer]:
+        """Replies to the PM's question from trusted humans: unedited, not a bot, and posted
+        after the question. `/answer <text>` counts; any other command does not."""
+        question = self.state.question_comment_id
+        if self.state.status is not Status.NEEDS_INPUT or question is None:
+            return []
+        found: list[Answer] = []
+        for comment in comments:
+            role = self.config.roles.get(comment.author.user_id, Role.NONE)
+            if (
+                comment.id <= question
+                or comment.edited_at is not None
+                or comment.author.is_bot
+                or role < Role.CONTRIBUTOR
+            ):
+                continue
+            command = parse_command(comment.body)
+            if command is None:
+                text = comment.body.strip()
+            elif command.verb == "answer":
+                text = command.arg.strip()
+            else:
+                continue
+            if text:
+                found.append(Answer(comment.id, comment.author.user_id, text))
+        return found
 
     def _foreign_commits(self, accepted: Sequence[AcceptedHandoff]) -> bool:
         """Every commit a committing run brings must be one the worker reported."""
@@ -375,6 +412,8 @@ class _Poll:
             return {"number": number}
         if effect.action == "merge":
             return self._merge(int(data["number"]), str(data["expected_head"]))
+        if effect.action == "post_question":
+            return self._post_question(effect.key, [str(d) for d in data["doubts"]])
         if effect.action == "post_kit":
             return self._post_kit(str(data["kind"]), str(data["rev"]))
         if effect.action == "revert_pr":
@@ -396,6 +435,13 @@ class _Poll:
             return {"sha": self.github.merge_pr(number, expected_head)}
         except Conflict as error:  # includes StaleHead
             return {"error": str(error)}
+
+    def _post_question(self, key: str, doubts: list[str]) -> dict[str, int | str | None]:
+        marker = question_marker(key)
+        for comment in self.github.list_comments(self.issue):
+            if comment.author.user_id == self.config.pm.user_id and marker in comment.body:
+                return {"comment_id": comment.id}
+        return {"comment_id": self.github.add_comment(self.issue, render_question(key, doubts)).id}
 
     def _post_kit(self, kind: str, revision: str) -> dict[str, int | str | None]:
         """Post the gate kit unless this revision's kit is already there (a crash may have hidden it)."""

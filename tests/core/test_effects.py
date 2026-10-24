@@ -240,3 +240,35 @@ def test_the_pr_comes_before_the_kit() -> None:
     state = replace(BRANCHED, spec_rev="s1")  # no PR yet
     effect = plan_effect(state, 4, "staging")
     assert effect is not None and effect.action == "open_pr"
+
+
+# --- questions --------------------------------------------------------------------------------------
+
+
+ASKING = replace(
+    BRANCHED,
+    status=Status.NEEDS_INPUT,
+    asked_from=Status.SPEC,
+    doubts=("Which formats?",),
+)
+
+
+def test_a_needs_input_issue_gets_its_question_posted_once() -> None:
+    effect = plan_effect(ASKING, 4, "staging")
+    assert effect is not None
+    assert (effect.key, effect.action) == ("question:0", "post_question")
+    assert list(effect.data["doubts"]) == ["Which formats?"]
+    posted = replace(ASKING, questions_posted=frozenset({"question:0"}))
+    assert plan_effect(posted, 4, "staging") is None
+
+
+def test_each_new_ask_is_a_new_question() -> None:
+    again = replace(ASKING, answers=("first answer",))
+    effect = plan_effect(again, 4, "staging")
+    assert effect is not None and effect.key == "question:1"
+    posted = replace(again, questions_posted=frozenset({"question:0"}))
+    assert plan_effect(posted, 4, "staging").key == "question:1"  # type: ignore[union-attr]
+
+
+def test_no_question_is_posted_without_doubts_to_ask() -> None:
+    assert plan_effect(replace(ASKING, doubts=()), 4, "staging") is not None  # asks generically

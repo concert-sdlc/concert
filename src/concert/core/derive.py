@@ -92,6 +92,11 @@ class IssueState:
     revert_head: str | None = None  # its head commit
     revert_ci_passed: bool | None = None  # None until the checks on its head are decided
     revert_merge_sha: str | None = None  # the revert commit on the base branch, once merged
+    asked_from: Status | None = None  # where a needs_input issue asked, and goes back to
+    doubts: tuple[str, ...] = ()  # the questions of the latest accepted run
+    question_comment_id: int | None = None  # the PM's question comment, answers come after it
+    questions_posted: frozenset[str] = frozenset()
+    answers: tuple[str, ...] = ()  # trusted humans' answers, oldest first
     dispatched_at: int = 0  # when the latest /dispatch was posted
     froze_queue: bool = False  # a failed staging verification froze the queue; cleared on unblock
     verify_failures: int = 0  # failed staging verifications so far, re-runs included
@@ -205,6 +210,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             approved_spec_rev=approved,
             note=str(note) if note is not None else None,
         )
+        if target is Status.NEEDS_INPUT:
+            moved = replace(moved, asked_from=source, question_comment_id=None)
         if trigger is Trigger.FAILED_REVERTED:
             return _relanded(moved)
         if trigger is Trigger.VERIFY_FAILED:
@@ -259,6 +266,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             settled_reviewers=state.settled_reviewers
             | ({finished.reviewer} if finished is not None and finished.reviewer else set()),
         )
+        if "doubts" in data:
+            state = replace(state, doubts=tuple(str(d) for d in data["doubts"]))
         if data.get("state") == "spec" and data.get("artifact_rev") is not None:
             state = replace(state, spec_rev=str(data["artifact_rev"]))
         if data.get("commit_sha") is not None:
@@ -296,6 +305,12 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         )
         if action == "open_pr":
             return replace(state, pr_number=int(result["number"]))
+        if action == "post_question":
+            return replace(
+                state,
+                question_comment_id=int(result["comment_id"]),
+                questions_posted=state.questions_posted | {key},
+            )
         if action == "post_kit":
             return replace(state, kits_posted=state.kits_posted | {key})
         if action == "mark_ready":
@@ -342,6 +357,21 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         if data.get("verb") == "approve" and data.get("kind") == "spec" and data.get("spec_hash"):
             state = replace(state, approved_spec_rev=str(data["spec_hash"]))
         return state
+    if kind == "answered":
+        data = event.data
+        if state.status is not Status.NEEDS_INPUT or Status(data["to"]) is not state.asked_from:
+            raise _Conflict(
+                f"conflict at seq {event.seq}: answer for {data['to']} "
+                f"but the issue is in {state.status.value} (asked from "
+                f"{state.asked_from.value if state.asked_from else 'nowhere'})"
+            )
+        return replace(
+            _fresh_state_bookkeeping(state),
+            status=Status(data["to"]),
+            asked_from=None,
+            question_comment_id=None,
+            answers=(*state.answers, str(data["text"])),
+        )
     if kind == "unblocked":
         if state.status is not Status.BLOCKED:
             raise _Conflict(

@@ -9,6 +9,7 @@ from concert.core.commands import Actor, Command, Role
 from concert.core.counters import AgentState
 from concert.core.decide import (
     AcceptedHandoff,
+    Answer,
     Proposed,
     ValidCommand,
     decide,
@@ -378,6 +379,7 @@ def test_an_accepted_handoff_event_carries_the_state_commit_and_artifact() -> No
         "state": "spec",
         "commit_sha": "aaa1111",
         "artifact_rev": "spec1",
+        "doubts": [],
     }
     state = log.apply(decide(log.state(), [committing], [])).state()
     assert state.spec_rev == "spec1" and state.head_sha == "aaa1111"
@@ -849,3 +851,56 @@ def test_merging_the_revert_ends_runs_still_in_flight() -> None:
     assert len(log.state().active_runs) == 1
     log.add("outcome", {"key": "merge_revert", "action": "merge_revert", "result": {"sha": "rm1"}})
     assert log.state().active_runs == ()
+
+
+# --- needs_input ----------------------------------------------------------------------------------
+
+
+def asking_log() -> Log:
+    log = log_at("inbox")
+    log.move("inbox", "triage", "dispatch").move("triage", "spec", "spec")
+    log.move("spec", "needs_input", "needs_input")
+    return log
+
+
+def test_the_first_answer_returns_the_issue_to_where_it_asked() -> None:
+    log = asking_log()
+    answers = [Answer(60, 2, "later"), Answer(50, 1, "CSV only")]
+    proposals = decide(log.state(), [], [], answers=answers)
+    assert [(p.kind, dict(p.data)) for p in proposals] == [
+        ("answered", {"to": "spec", "comment_id": 50, "author_id": 1, "text": "CSV only"})
+    ]
+    assert log.apply(proposals).state().status is Status.SPEC
+
+
+def test_no_answer_means_no_change() -> None:
+    assert decide(asking_log().state(), [], [], answers=[]) == []
+
+
+def test_answers_are_ignored_outside_needs_input() -> None:
+    assert decide(log_at("uat").state(), [], [], answers=[Answer(5, 1, "x")]) == []
+
+
+def test_a_very_long_answer_is_truncated_in_the_event() -> None:
+    proposals = decide(asking_log().state(), [], [], answers=[Answer(5, 1, "x" * 50_000)])
+    assert len(str(proposals[0].data["text"])) <= 8_000
+
+
+def test_accepted_handoffs_carry_the_agents_doubts() -> None:
+    log = log_at("inbox")
+    log.move("inbox", "triage", "dispatch")
+    item = handoff("r-3", "triage", "spec")
+    parsed = parse_handoff(
+        {
+            "schema": 1,
+            "state": "triage",
+            "run_id": "r-3",
+            "runner": "vm-1",
+            "exit": "spec",
+            "commit_sha": None,
+            "artifact_rev": None,
+            "doubts": ["Which formats?"],
+        }
+    )
+    proposals = decide(log.state(), [AcceptedHandoff(parsed, item.decision, item.comment_id)], [])
+    assert proposals[0].data["doubts"] == ["Which formats?"]

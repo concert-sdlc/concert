@@ -33,6 +33,7 @@ class AgentTask:
     body: str  # untrusted
     spec_rev: str | None
     approved_spec_rev: str | None
+    answers: tuple[str, ...] = ()  # trusted humans' replies to earlier questions, oldest first
 
 
 @dataclass(frozen=True)
@@ -88,14 +89,19 @@ class Worker:
         for run in mine:
             write_heartbeat(self.github, self.runner, [run.run_id], now)
             try:
-                self._execute(issue, run, state.spec_rev, state.approved_spec_rev)
+                self._execute(issue, run, state.spec_rev, state.approved_spec_rev, state.answers)
             except AgentFailure:
                 continue
             done.append(run.run_id)
         return done
 
     def _execute(
-        self, issue: int, run: ActiveRun, spec_rev: str | None, approved: str | None
+        self,
+        issue: int,
+        run: ActiveRun,
+        spec_rev: str | None,
+        approved: str | None,
+        answers: tuple[str, ...],
     ) -> None:
         info = self.github.get_issue(issue)
         tree = dict(self.github.read_tree(run.head)) if run.head else {}
@@ -111,6 +117,7 @@ class Worker:
                 body=info.body,
                 spec_rev=spec_rev,
                 approved_spec_rev=approved,
+                answers=answers,
             )
         )
         state = RunState(run.state)

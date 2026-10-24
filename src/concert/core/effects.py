@@ -66,6 +66,11 @@ def plan_effect(
         return Effect("open_pr", "open_pr", data, resumed=False)
     if state.pr_number is not None and not state.pr_ready and state.status in _READY_STATES:
         return Effect("ready", "mark_ready", {"number": state.pr_number}, resumed=False)
+    if state.status is Status.NEEDS_INPUT:
+        key = f"question:{len(state.answers)}"
+        if key in state.questions_posted:
+            return None
+        return Effect(key, "post_question", {"doubts": list(state.doubts)}, resumed=False)
     kit = _plan_kit(state, awaiting_human)
     if kit is not None:
         return kit

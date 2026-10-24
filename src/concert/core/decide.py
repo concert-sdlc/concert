@@ -40,6 +40,18 @@ class AcceptedHandoff:
 
 
 @dataclass(frozen=True)
+class Answer:
+    """A trusted human's reply to the PM's question (the caller checked who wrote it)."""
+
+    comment_id: int
+    author_id: int
+    text: str
+
+
+_ANSWER_LIMIT = 8_000
+
+
+@dataclass(frozen=True)
 class ValidCommand:
     comment_id: int
     command: Command
@@ -88,13 +100,29 @@ def decide(
     handoffs: Sequence[AcceptedHandoff],
     commands: Sequence[ValidCommand],
     verify_reruns: int = 1,
+    answers: Sequence[Answer] = (),
 ) -> list[Proposed]:
     if state.blocked_reason is not None or is_terminal(state.status):
         return []
     from_handoffs = _from_handoffs(state, handoffs, verify_reruns)
     if from_handoffs:
         return from_handoffs
+    if state.status is Status.NEEDS_INPUT:
+        return _from_answers(state, answers)
     return _from_commands(state, commands)
+
+
+def _from_answers(state: IssueState, answers: Sequence[Answer]) -> list[Proposed]:
+    if state.asked_from is None or not answers:
+        return []
+    first = min(answers, key=lambda a: a.comment_id)
+    data = {
+        "to": state.asked_from.value,
+        "comment_id": first.comment_id,
+        "author_id": first.author_id,
+        "text": first.text[:_ANSWER_LIMIT],
+    }
+    return [Proposed("answered", data)]
 
 
 # --- handoffs --------------------------------------------------------------------------------
@@ -197,6 +225,7 @@ def _accepted(item: AcceptedHandoff) -> Proposed:
             "state": handoff.state.value,
             "commit_sha": handoff.commit_sha,
             "artifact_rev": handoff.artifact_rev,
+            "doubts": list(handoff.doubts),
         },
     )
 

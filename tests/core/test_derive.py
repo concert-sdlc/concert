@@ -518,3 +518,62 @@ def test_a_kit_outcome_remembers_the_kit_was_posted() -> None:
     journey.add("outcome", {"key": "kit:spec:s1", "result": {"comment_id": 5}})
     state = derive(journey.raw())
     assert state.kits_posted == frozenset({"kit:spec:s1"}) and state.pending_intents == ()
+
+
+# --- needs_input ---------------------------------------------------------------------------------
+
+
+def asking(source: str = "spec") -> Journey:
+    journey = (
+        Journey()
+        .add("created", {"issue_type": "code"})
+        .move("inbox", "triage", "dispatch")
+        .move("triage", "spec", "spec")
+    )
+    journey.add(
+        "handoff_accepted",
+        {
+            "run_id": "r-1",
+            "state": "spec",
+            "commit_sha": None,
+            "artifact_rev": None,
+            "doubts": ["Which formats?", "Which locale?"],
+        },
+    )
+    return journey.move("spec", "needs_input", "needs_input")
+
+
+def test_a_needs_input_issue_remembers_where_it_asked_and_what() -> None:
+    state = derive(asking().raw())
+    assert state.status is Status.NEEDS_INPUT
+    assert state.asked_from is Status.SPEC
+    assert state.doubts == ("Which formats?", "Which locale?")
+
+
+def test_the_question_comment_is_recorded_by_its_outcome() -> None:
+    journey = asking()
+    journey.add("intent", {"key": "question:1", "action": "post_question"})
+    journey.add("outcome", {"key": "question:1", "result": {"comment_id": 41}})
+    state = derive(journey.raw())
+    assert state.question_comment_id == 41 and state.questions_posted == frozenset({"question:1"})
+
+
+def test_an_answer_returns_the_issue_to_where_it_asked_without_charging() -> None:
+    journey = asking()
+    journey.add("answered", {"to": "spec", "comment_id": 50, "author_id": 1, "text": "CSV, en-US"})
+    state = derive(journey.raw())
+    assert state.status is Status.SPEC and state.asked_from is None
+    assert state.answers == ("CSV, en-US",)
+    assert state.counters.used(AgentState.SPEC) == 0
+
+
+def test_an_answer_that_names_another_state_is_a_conflict() -> None:
+    journey = asking()
+    journey.add("answered", {"to": "implementing", "comment_id": 50, "author_id": 1, "text": "x"})
+    assert derive(journey.raw()).status is Status.BLOCKED
+
+
+def test_an_answer_outside_needs_input_is_a_conflict() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("answered", {"to": "spec", "comment_id": 1, "author_id": 1, "text": "x"})
+    assert derive(journey.raw()).status is Status.BLOCKED

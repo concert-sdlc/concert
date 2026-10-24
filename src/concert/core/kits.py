@@ -150,3 +150,31 @@ def _advisory(summary: str) -> list[str]:
         *([note] if note else []),
         "",
     ]
+
+
+def question_marker(key: str) -> str:
+    return f"<!-- pm-question:{key} -->"
+
+
+def render_question(key: str, doubts: Sequence[str]) -> str:
+    """The agent's questions, quoted (they are agent text), and how to answer."""
+    asked = [f"> {line}".rstrip() for doubt in doubts for line in _single_line(doubt).splitlines()]
+    return "\n".join(
+        [
+            "## A question before this can go on",
+            "",
+            *(asked or ["> The agent needs a decision from a person."]),
+            "",
+            "Reply in a comment, or use the explicit form:",
+            "",
+            "```",
+            "/answer <your answer>",
+            "```",
+            "",
+            question_marker(key),
+        ]
+    )
+
+
+def _single_line(text: str) -> str:
+    return text.replace("```", "'''").strip()

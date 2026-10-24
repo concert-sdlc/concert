@@ -169,3 +169,20 @@ def test_a_failed_agent_run_posts_nothing_so_the_lease_can_lapse() -> None:
 
     assert worker(world, Failing()).run_once(issue, now=world.fake.now) == []
     assert handoffs(world, issue) == []
+
+
+def test_the_agent_receives_the_humans_answers() -> None:
+    world = World()
+    issue = world.new_issue()
+    world.poll(issue)
+    world.say(ALICE, issue, "/dispatch")
+    world.poll(issue)
+    run = world.assign(issue, head=None)
+    world.handoff(issue, run, "triage", "needs_input", doubts=["Which formats?"])
+    world.poll(issue)
+    world.say(ALICE, issue, "CSV")
+    world.poll(issue)
+    world.assign(issue, head=None)
+    agent = Scripted()
+    worker(world, agent).run_once(issue, now=world.fake.now)
+    assert agent.tasks[0].answers == ("CSV",)
