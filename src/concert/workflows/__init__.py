@@ -69,7 +69,7 @@ def render_watchdog(
             raise ValueError(f"name {name!r} must be letters, digits, '_', '.' or '-'")
     pinned = package_version or _installed_version()
     command = (
-        f"uvx --from concert-sdlc=={pinned} concert watchdog"
+        "~/.local/bin/concert watchdog"
         " --repo ${{ github.repository }}"
         f" --steering {steering} --stale-after {stale_minutes}"
         f" --runners {','.join(runners)} --admins {','.join(admins)}"
@@ -88,7 +88,8 @@ def render_watchdog(
         "  watchdog:",
         "    runs-on: ubuntu-latest",
         "    steps:",
-        "      - uses: astral-sh/setup-uv@v5",
+        # no third-party action runs with this token: install the pinned package from PyPI
+        f"      - run: python3 -m pip install --user --no-cache-dir concert-sdlc=={pinned}",
         "      - run: " + command,
         "        env:",
         "          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}",

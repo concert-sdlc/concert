@@ -112,7 +112,7 @@ def test_the_watchdog_runs_on_a_schedule_with_only_the_permissions_it_needs() ->
     triggers = triggers_of(doc)
     assert isinstance(triggers, dict) and triggers["schedule"] == [{"cron": "0 */2 * * *"}]
     assert doc["permissions"] == {"contents": "read", "issues": "write"}
-    assert "uvx" in text and "concert-sdlc" in text and "watchdog" in text
+    assert "pip install --user --no-cache-dir concert-sdlc==" in text and "concert watchdog" in text
     assert "GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}" in text
     assert "--stale-after 30" in text and "--steering 7" in text
 
@@ -140,3 +140,10 @@ def test_templates_are_versioned() -> None:
     assert CI_TEMPLATE.startswith("concert-ci@") and WATCHDOG_TEMPLATE.startswith(
         "concert-watchdog@"
     )
+
+
+def test_the_watchdog_runs_no_third_party_action_and_pins_the_package() -> None:
+    text = render_watchdog(2, 30, 7, ["vm-1"], ["alice"], package_version="1.2.3")
+    uses = [line.split("uses:")[1].strip() for line in text.splitlines() if "uses:" in line]
+    assert uses == []  # the token never meets an action someone else can change
+    assert "concert-sdlc==1.2.3" in text
