@@ -6,8 +6,9 @@ reject as invalid (one infra retry, then `blocked`).
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import Any, cast
 
 from concert.core.events import MalformedEvent, UnsupportedSchema
@@ -46,6 +47,9 @@ class Handoff:
     depends_on: tuple[Mapping[str, Any], ...] = ()
     run_commits: tuple[str, ...] = ()
     reviewer: str | None = None  # in_review only: "code" or "security"
+    rebases: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType({})
+    )  # old -> new SHA
 
 
 def _string(raw: Mapping[str, Any], key: str) -> str:
@@ -74,6 +78,16 @@ def _strings(raw: Mapping[str, Any], key: str) -> tuple[str, ...]:
     if not all(isinstance(item, str) for item in items):
         raise MalformedEvent(f"handoff field {key!r} must be a list of strings")
     return tuple(cast("list[str]", items))
+
+
+def _string_map(raw: Mapping[str, Any], key: str) -> Mapping[str, str]:
+    value: Any = raw.get(key, {})
+    if not isinstance(value, dict):
+        raise MalformedEvent(f"handoff field {key!r} must be a mapping of strings")
+    pairs = cast("dict[Any, Any]", value)
+    if not all(isinstance(k, str) and isinstance(v, str) for k, v in pairs.items()):
+        raise MalformedEvent(f"handoff field {key!r} must map strings to strings")
+    return MappingProxyType(cast("dict[str, str]", dict(pairs)))
 
 
 def _mappings(raw: Mapping[str, Any], key: str) -> tuple[Mapping[str, Any], ...]:
@@ -107,6 +121,7 @@ def _parse_v1(raw: Mapping[str, Any]) -> Handoff:
         depends_on=_mappings(raw, "depends_on"),
         run_commits=_strings(raw, "run_commits"),
         reviewer=_nullable_string(raw, "reviewer"),
+        rebases=_string_map(raw, "rebases"),
     )
 
 

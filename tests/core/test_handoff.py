@@ -270,3 +270,18 @@ def test_needs_prerequisite_wins_over_changes_needed_over_clean() -> None:
 def test_consolidating_no_reviews_is_an_error() -> None:
     with pytest.raises(ValueError):
         consolidate_reviews([])
+
+
+# --- rebases -----------------------------------------------------------------------------
+
+
+def test_rebases_are_recorded_as_an_old_to_new_mapping() -> None:
+    h = handoff(rebases={"c1": "c1r", "c2": "c2r"})
+    assert dict(h.rebases) == {"c1": "c1r", "c2": "c2r"}
+    assert handoff().rebases == {}
+
+
+@pytest.mark.parametrize("bad", ["c1", ["c1"], {"c1": 2}, {1: "c1r"}])
+def test_a_malformed_rebase_mapping_is_rejected(bad: object) -> None:
+    with pytest.raises(MalformedEvent):
+        parse_handoff(raw_handoff(rebases=bad))
