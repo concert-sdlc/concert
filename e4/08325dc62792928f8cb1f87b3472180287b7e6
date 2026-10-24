@@ -1,0 +1,31 @@
+tests/core/test_events.py
+  s_4aba28ccdf2cb3::t_2582f188dc8d1e 78
+  s_4aba28ccdf2cb3::t_593734872e2f4f 75-77
+  s_4aba28ccdf2cb3::t_9431c9d74143d2 79-81
+  s_4aba28ccdf2cb3::t_3b8e7a720f4880 1-74,82-119
+tests/core/test_derive.py
+  s_4aba28ccdf2cb3::t_889e8aceea0896 1-160
+src/concert/core/events.py
+  s_4aba28ccdf2cb3::t_fbc5e74fd3b183 1-115
+  s_4aba28ccdf2cb3::t_927329e96a481a 116-119
+src/concert/core/derive.py
+  s_4aba28ccdf2cb3::t_fde54b26144d80 1-120
+tests/fixtures/events/v1_journey.json
+  s_4aba28ccdf2cb3::t_ba8a20dda3726a 1-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e408325dc62792928f8cb1f87b3472180287b7e6",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
