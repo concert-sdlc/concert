@@ -1,0 +1,21 @@
+src/concert/sandbox/workspace.py
+  s_4aba28ccdf2cb3::t_0cf96d001ecca6 1-83
+tests/sandbox/test_workspace.py
+  s_4aba28ccdf2cb3::t_3d821dbff6f2a9 1-103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c9b0e28032c02b9f9e6fa4efee90cde10e18683c",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
