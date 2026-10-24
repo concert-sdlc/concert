@@ -119,23 +119,14 @@ def test_a_dependent_issue_integrates_in_the_cycle_after_its_prerequisite_lands(
     assert freed.head == second and freed.states[second].status is Status.INTEGRATING
 
 
-def test_a_hotfix_jumps_the_queue_and_passes_a_frozen_queue() -> None:
+def test_a_hotfix_jumps_the_queue() -> None:
     from concert.core.commands import Role
 
     world = World()
-    world.config = (
-        replace(
-            world.config,
-            gate_policy=POLICY,
-            roles={ALICE.user_id: Role.ADMIN},
-            gate_policy_admins=None,
-        )
-        if False
-        else replace(
-            world.config,
-            gate_policy=replace(POLICY, admins=frozenset({ALICE.user_id})),
-            roles={ALICE.user_id: Role.ADMIN},
-        )
+    world.config = replace(
+        world.config,
+        gate_policy=replace(POLICY, admins=frozenset({ALICE.user_id})),
+        roles={ALICE.user_id: Role.ADMIN},
     )
     normal, urgent = world.new_issue(), world.new_issue()
     heads = {
