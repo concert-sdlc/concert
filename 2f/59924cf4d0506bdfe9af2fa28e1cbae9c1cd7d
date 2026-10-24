@@ -1,0 +1,52 @@
+tests/core/test_queue.py
+  s_4aba28ccdf2cb3::t_c439ba3b28c938 1-54
+  s_4aba28ccdf2cb3::t_d5b916195e68bb 55-56
+src/concert/core/queue.py
+  s_4aba28ccdf2cb3::t_84e12f92022a3b 1-44
+tests/core/test_transitions.py
+  s_4aba28ccdf2cb3::t_c9fedd5a2c07e3 1-64
+src/concert/core/counters.py
+  s_4aba28ccdf2cb3::t_d318f09048bee5 3-4,6
+  s_4aba28ccdf2cb3::t_8c26405a470dec 1-2,5,7-35
+  s_4aba28ccdf2cb3::t_8083a68ab6978f 36-69
+tests/core/test_counters.py
+  s_4aba28ccdf2cb3::t_c5bd4875b234f5 1-2,4-12
+  s_4aba28ccdf2cb3::t_e5eb3a99f3750d 3
+  s_4aba28ccdf2cb3::t_953a6e1c3e99b6 13-15
+  s_4aba28ccdf2cb3::t_82a50db9971714 16-49
+tests/core/test_transitions_types.py
+  s_4aba28ccdf2cb3::t_45ff2c9dad4089 1-91
+src/concert/core/transitions.py
+  s_4aba28ccdf2cb3::t_8eeb61b39444cd 80
+  s_4aba28ccdf2cb3::t_0f1efa93d4cd15 1-46,48,60-75,77-79,81-100,102-103,145-157,161
+  s_4aba28ccdf2cb3::t_f65f16cfeff5c5 158-160,162
+  s_4aba28ccdf2cb3::t_32101f9230e699 47,49-59
+  s_4aba28ccdf2cb3::t_8217d24764cc3a 101,104-144
+  s_4aba28ccdf2cb3::t_4b33556634670a 76
+.gitignore
+  s_4aba28ccdf2cb3::t_9e822664cc55e9 1-6
+.python-version
+  s_4aba28ccdf2cb3::t_4dd5d6531224af 1
+pyproject.toml
+  s_4aba28ccdf2cb3::t_5d81a7e2f4a6d2 1-33
+src/concert/cli/__init__.py
+  s_4aba28ccdf2cb3::t_fca2e5bfd9ee0e 1-2
+uv.lock
+  s_4aba28ccdf2cb3::t_bf289625b4ac21 1-141
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2f59924cf4d0506bdfe9af2fa28e1cbae9c1cd7d",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
