@@ -20,6 +20,48 @@ class CheckRun:
     workflow_hash: str  # hash of the workflow file that produced the run
 
 
+@dataclass(frozen=True)
+class PrReview:
+    user_id: int
+    state: str  # APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED
+    commit_id: str  # the head the review was made on
+
+
+def plan_review_evidence(
+    head_sha: str | None,
+    reviews: Sequence[PrReview],
+    recorded: Sequence[Evidence],
+    admins: Collection[int],
+) -> list[Proposed]:
+    """An approving GitHub PR review by an admin on the current head is the evidence a change to
+    protected paths needs (a comment is not enough: GitHub binds a review to a commit)."""
+    if head_sha is None:
+        return []
+    known = {e.actor_id for e in recorded if e.kind == "admin_review" and e.head_sha == head_sha}
+    proposals: list[Proposed] = []
+    for review in reviews:
+        if (
+            review.state == "APPROVED"
+            and review.commit_id == head_sha
+            and review.user_id in admins
+            and review.user_id not in known
+        ):
+            known.add(review.user_id)
+            proposals.append(
+                Proposed(
+                    "evidence",
+                    {
+                        "kind": "admin_review",
+                        "item": None,
+                        "head_sha": head_sha,
+                        "passed": True,
+                        "actor_id": review.user_id,
+                    },
+                )
+            )
+    return proposals
+
+
 def plan_ci_evidence(
     head_sha: str | None,
     runs: Sequence[CheckRun],

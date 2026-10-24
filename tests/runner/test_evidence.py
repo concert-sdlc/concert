@@ -175,3 +175,61 @@ def test_a_revert_does_not_integrate_without_the_admin_approval() -> None:
     world, issue, head = revert_world()
     world.fake.add_check_run(head, "tests", "success", "w1")
     assert world.poll(issue).status is Status.HUMAN_UAT
+
+
+# --- per-issue requirements from the diff -----------------------------------------------------------
+
+
+def world_with(**config: object) -> World:
+    world = policy_world()
+    world.config = replace(
+        world.config,
+        gate_policy=replace(POLICY, admins=frozenset({ALICE.user_id})),
+        roles={ALICE.user_id: Role.ADMIN},
+        **config,
+    )
+    return world
+
+
+def ready_for_approval(world: World) -> tuple[int, str]:
+    issue = world.new_issue()
+    head = to_human_uat(world, issue)
+    world.fake.add_check_run(head, "tests", "success", "w1")
+    return issue, head
+
+
+def test_a_change_to_sensitive_paths_also_needs_a_security_approval() -> None:
+    world = world_with(sensitive_paths=("backend/**",))
+    issue, head = ready_for_approval(world)
+    world.say(ALICE, issue, f"/approve uat {head}")
+    assert world.poll(issue).status is Status.HUMAN_UAT
+    world.say(ALICE, issue, f"/approve security {head}")
+    assert world.poll(issue).status is Status.INTEGRATING
+
+
+def test_a_change_elsewhere_does_not_need_a_security_approval() -> None:
+    world = world_with(sensitive_paths=("payments/**",))
+    issue, head = ready_for_approval(world)
+    world.say(ALICE, issue, f"/approve uat {head}")
+    assert world.poll(issue).status is Status.INTEGRATING
+
+
+def test_a_change_to_protected_paths_needs_an_admin_review_on_the_head() -> None:
+    world = world_with(protected_paths=("backend/**",))
+    issue, head = ready_for_approval(world)
+    world.say(ALICE, issue, f"/approve uat {head}")
+    assert world.poll(issue).status is Status.HUMAN_UAT
+    pr = world.state(issue).pr_number or 0
+    world.fake.add_review(pr, ALICE.user_id, "APPROVED", "0" * 40)  # a review of another commit
+    assert world.poll(issue).status is Status.HUMAN_UAT
+    world.fake.add_review(pr, ALICE.user_id, "APPROVED", head)
+    assert world.poll(issue).status is Status.INTEGRATING
+
+
+def test_changes_that_landed_on_staging_meanwhile_are_not_the_issues_changes() -> None:
+    world = world_with(sensitive_paths=("payments/**",))
+    issue, head = ready_for_approval(world)
+    gh = world.fake.client(world.pm_identity)
+    gh.commit("staging", "someone else", {"payments/x.py": "1"}, author="x", committer="x")
+    world.say(ALICE, issue, f"/approve uat {head}")
+    assert world.poll(issue).status is Status.INTEGRATING

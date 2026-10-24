@@ -11,7 +11,7 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
-from concert.core.ci import CheckRun
+from concert.core.ci import CheckRun, PrReview
 from concert.core.commit_binding import CommitMeta
 from concert.github.api import (
     Comment,
@@ -55,6 +55,7 @@ class FakeGitHub:
     refs: dict[str, str] = field(default_factory=dict[str, str])
     prs: dict[int, _Pr] = field(default_factory=dict[int, _Pr])
     check_runs: list[CheckRun] = field(default_factory=list[CheckRun])
+    reviews: dict[int, list[PrReview]] = field(default_factory=dict[int, list[PrReview]])
 
     def tick(self, seconds: int) -> None:
         self.now += seconds
@@ -71,6 +72,10 @@ class FakeGitHub:
     ) -> None:
         """Test setup: a CI check run on a commit (conclusion None = still running)."""
         self.check_runs.append(CheckRun(name, sha, conclusion, workflow_hash))
+
+    def add_review(self, pr: int, user_id: int, state: str, commit_id: str) -> None:
+        """Test setup: a pull request review."""
+        self.reviews.setdefault(pr, []).append(PrReview(user_id, state, commit_id))
 
     # --- internals ---------------------------------------------------------------------------
 
@@ -309,6 +314,10 @@ class FakeClient:
         )
         self.fake.prs[pr.number] = _Pr(pr)
         return pr
+
+    def list_pr_reviews(self, number: int) -> Sequence[PrReview]:
+        self._pr(number)
+        return list(self.fake.reviews.get(number, []))
 
     def find_pr(self, head: str) -> PullRequest | None:
         return next(

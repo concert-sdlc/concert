@@ -9,7 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from concert.core.ci import CheckRun
+from concert.core.ci import CheckRun, PrReview
 from concert.core.commit_binding import CommitMeta
 
 
@@ -107,6 +107,7 @@ class GitHubApi(Protocol):
     # pull requests
     def create_pr(self, head: str, base: str, title: str) -> PullRequest: ...
     def get_pr(self, number: int) -> PullRequest: ...
+    def list_pr_reviews(self, number: int) -> Sequence[PrReview]: ...
     def find_pr(self, head: str) -> PullRequest | None: ...  # the open PR for a head branch
     def mark_ready(self, number: int) -> PullRequest: ...
     def revert_pr(self, number: int) -> PullRequest: ...  # a ready PR that undoes a merged one

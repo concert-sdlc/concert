@@ -47,6 +47,7 @@ def test_a_complete_file_becomes_a_runner_config() -> None:
     )
     assert config.on_failure == "auto_revert" and config.verify_reruns == 1
     assert config.protected_paths == ("process.yaml", ".github/**")
+    assert config.sensitive_paths == ("**/auth/**",)
 
 
 def test_the_highest_role_wins_for_a_user_listed_twice() -> None:

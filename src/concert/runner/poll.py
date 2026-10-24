@@ -10,11 +10,10 @@ idempotent side effects (creating the issue branch, fast-forwarding it to an acc
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from fnmatch import fnmatch
 from typing import Protocol
 
 from concert.core.assign import Heartbeat, RunnerInfo, expire_leases, plan_assignments
-from concert.core.ci import plan_ci_evidence
+from concert.core.ci import plan_ci_evidence, plan_review_evidence
 from concert.core.commands import IssueContext, Role, Valid, validate_command
 from concert.core.commit_binding import ForeignCommits, check_commit_binding
 from concert.core.decide import (
@@ -39,6 +38,7 @@ from concert.core.handoff import (
     RunState,
     accept_handoff,
 )
+from concert.core.paths import changed_paths, matches_any
 from concert.core.transitions import IssueType, Status, Trigger, is_terminal
 from concert.github.api import Comment, Conflict, GitHubApi, Identity
 from concert.github.comments import (
@@ -67,6 +67,7 @@ class RunnerConfig:
     base_branch: str
     runners: Sequence[RunnerInfo] = ()  # runners the PM may assign to; empty: no assignments
     gate_policy: GatePolicy | None = None  # None: CI is not read and nothing integrates
+    sensitive_paths: Sequence[str] = ()  # a change to these also needs a security approval
     protected_paths: Sequence[str] = ()  # an auto-revert touching these is never merged by the PM
     on_failure: str = "freeze"  # staging verification: "freeze" or "auto_revert"
     verify_reruns: int = 1  # automatic re-runs of a failed verification (flaky tests)
@@ -168,6 +169,7 @@ class _Poll:
         self._intake()
         self._create_branch()  # intake may have moved the issue into spec
         self._evidence()
+        self._admin_reviews()
         self._revert_ci()
         self._effects()
         self._integrate()
@@ -419,8 +421,8 @@ class _Poll:
         reverted = dict(self.github.read_tree(expected_head))
         if reverted != expected:
             return {"error": "the revert PR is not the inverse of the failed merge"}
-        changed = [p for p in sorted(set(base) | set(reverted)) if base.get(p) != reverted.get(p)]
-        touched = [p for p in changed if any(fnmatch(p, g) for g in self.config.protected_paths)]
+        changed = changed_paths(base, reverted)
+        touched = [p for p in changed if matches_any(p, self.config.protected_paths)]
         if touched:
             return {"error": f"the revert touches protected paths: {', '.join(touched)}"}
         return self._merge(number, expected_head)
@@ -440,7 +442,32 @@ class _Poll:
         if policy is None:
             return None
         is_revert = self.state.issue_type is IssueType.REVERT
-        return replace(policy, issue_type=self.state.issue_type, require_reviews=not is_revert)
+        touched = self._changed_paths()
+        return replace(
+            policy,
+            issue_type=self.state.issue_type,
+            require_reviews=not is_revert,
+            security_sensitive=any(matches_any(p, self.config.sensitive_paths) for p in touched),
+            protected_changed=any(matches_any(p, self.config.protected_paths) for p in touched),
+        )
+
+    def _changed_paths(self) -> list[str]:
+        """What the issue branch changed since it was created (empty before it has a head)."""
+        state = self.state
+        if state.head_sha is None or state.branch_base is None:
+            return []
+        return changed_paths(
+            self.github.read_tree(state.branch_base), self.github.read_tree(state.head_sha)
+        )
+
+    def _admin_reviews(self) -> None:
+        policy, state = self.config.gate_policy, self.state
+        if policy is None or state.pr_number is None or state.status is Status.BLOCKED:
+            return
+        reviews = self.github.list_pr_reviews(state.pr_number)
+        planned = plan_review_evidence(state.head_sha, reviews, state.evidence, policy.admins)
+        if planned:
+            self._post(planned)
 
     def _gate_ready(self) -> bool:
         policy = self._gate_policy()

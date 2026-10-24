@@ -75,6 +75,9 @@ def load_runner_config(text: str, epoch: int, base_branch: str) -> RunnerConfig:
             for r in runners
         ),
         gate_policy=policy,
+        sensitive_paths=tuple(
+            map(str, _list(_mapping(doc.get("security")).get("sensitive_paths")))
+        ),
         protected_paths=tuple(map(str, _list(doc.get("protected_paths")))),
         on_failure=str(on_failure),
         verify_reruns=int(verify.get("rerun_on_failure", 1)),
