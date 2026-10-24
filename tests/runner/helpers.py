@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from concert.core.commands import Role
+from concert.core.derive import derive
 from concert.core.events import append_event, parse_event
 from concert.core.spec_hash import spec_tree_hash
 from concert.github.api import GitHubApi, Identity
@@ -60,10 +61,23 @@ class World:
         event = append_event(chain, epoch=CONFIG.epoch, kind=kind, data=data)
         publish_events(self.pm, self.mirror, issue, [event])
 
-    def assign(self, issue: int, head: str | None) -> str:
+    def assign(self, issue: int, head: str | None, reviewer: str | None = None) -> str:
+        trusted = reconcile(self.pm, self.mirror, issue, self.pm.list_comments(issue), PM)
+        status = derive(trusted.events).status.value
         self.runs += 1
         run_id = f"r-{self.runs}"
-        self.pm_post(issue, "assignment", {"run_id": run_id, "runner": "vm-1", "head": head})
+        self.pm_post(
+            issue,
+            "assignment",
+            {
+                "run_id": run_id,
+                "runner": "vm-1",
+                "state": status,
+                "reviewer": reviewer,
+                "head": head,
+                "issued_at": self.fake.now,
+            },
+        )
         return run_id
 
     def handoff(self, issue: int, run_id: str, state: str, exit_name: str, **fields: Any) -> int:

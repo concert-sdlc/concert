@@ -190,7 +190,7 @@ def test_an_issue_travels_from_inbox_to_uat() -> None:
     assert world.poll(issue).status is Status.IN_REVIEW
 
     for reviewer in REVIEWERS:
-        run = world.assign(issue, head=code_commit)
+        run = world.assign(issue, head=code_commit, reviewer=reviewer)
         world.handoff(
             issue,
             run,

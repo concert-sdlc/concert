@@ -237,3 +237,68 @@ def test_a_returned_spec_loses_its_approval() -> None:
         .move("implementing", "spec_approval", "spec_drift")
     )
     assert derive(journey.raw()).approved_spec_rev is None
+
+
+# --- assignments and leases ---------------------------------------------------------------------
+
+
+def assignment(
+    run_id: str, runner: str = "vm-1", state: str = "triage", **extra: object
+) -> dict[str, object]:
+    return {
+        "run_id": run_id,
+        "runner": runner,
+        "state": state,
+        "reviewer": None,
+        "head": None,
+        "issued_at": 100,
+    } | extra
+
+
+def test_an_assignment_makes_the_run_active() -> None:
+    journey = Journey().add("created", {"issue_type": "code"}).move("inbox", "triage", "dispatch")
+    journey.add("assignment", assignment("r-1-1"))
+    state = derive(journey.raw())
+    assert [(r.run_id, r.runner, r.state, r.issued_at) for r in state.active_runs] == [
+        ("r-1-1", "vm-1", "triage", 100)
+    ]
+    assert state.assignments_made == 1
+
+
+def test_an_accepted_handoff_ends_the_run_and_a_transition_clears_the_state() -> None:
+    journey = Journey().add("created", {"issue_type": "code"}).move("inbox", "triage", "dispatch")
+    journey.add("assignment", assignment("r-1-1"))
+    journey.add(
+        "handoff_accepted",
+        {"run_id": "r-1-1", "state": "triage", "commit_sha": None, "artifact_rev": None},
+    )
+    state = derive(journey.raw())
+    assert state.active_runs == ()
+    assert state.settled_runs == frozenset({"r-1-1"})  # accepted in this state, no transition yet
+    journey.move("triage", "spec", "spec")
+    assert derive(journey.raw()).settled_runs == frozenset()
+
+
+def test_an_expired_lease_ends_the_run_and_counts_an_infra_attempt() -> None:
+    journey = Journey().add("created", {"issue_type": "code"}).move("inbox", "triage", "dispatch")
+    journey.add("assignment", assignment("r-1-1"))
+    journey.add("lease_expired", {"run_id": "r-1-1", "state": "triage", "at": 400})
+    state = derive(journey.raw())
+    assert state.active_runs == ()
+    assert state.infra_attempts == {"triage": 1}
+    assert state.last_expiry_at == 400
+
+
+def test_infra_attempts_reset_when_the_issue_moves_on() -> None:
+    journey = Journey().add("created", {"issue_type": "code"}).move("inbox", "triage", "dispatch")
+    journey.add("assignment", assignment("r-1-1"))
+    journey.add("lease_expired", {"run_id": "r-1-1", "state": "triage", "at": 400})
+    journey.move("triage", "spec", "spec")
+    assert derive(journey.raw()).infra_attempts == {}
+
+
+def test_a_transition_drops_runs_still_in_flight_for_the_old_state() -> None:
+    journey = Journey().add("created", {"issue_type": "code"}).move("inbox", "triage", "dispatch")
+    journey.add("assignment", assignment("r-1-1"))
+    journey.move("triage", "blocked", "budget_exceeded")
+    assert derive(journey.raw()).active_runs == ()

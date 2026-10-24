@@ -8,6 +8,7 @@ Any failure sends the issue to `blocked` with the reason shown, never a guess.
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 from typing import Any
 
 from concert.core.counters import AgentState, Cause, Outcome, RetryCounters, charge_target
@@ -38,6 +39,16 @@ _RECORD_ONLY = frozenset({"assignment", "intent", "outcome", "reconciled", "admi
 
 
 @dataclass(frozen=True)
+class ActiveRun:
+    run_id: str
+    runner: str
+    state: str
+    reviewer: str | None
+    head: str | None  # the branch head the run started from
+    issued_at: int
+
+
+@dataclass(frozen=True)
 class IssueState:
     status: Status = Status.INBOX
     issue_type: IssueType = IssueType.CODE
@@ -49,6 +60,12 @@ class IssueState:
     spec_rev: str | None = None  # spec hash of the latest accepted spec run
     approved_spec_rev: str | None = None  # the spec hash a human approved, until the spec changes
     head_sha: str | None = None  # the commit of the latest accepted committing run
+    active_runs: tuple[ActiveRun, ...] = ()  # assigned, not yet accepted or expired
+    assignments_made: int = 0
+    settled_runs: frozenset[str] = frozenset()  # accepted in this state, no transition yet
+    settled_reviewers: frozenset[str] = frozenset()
+    infra_attempts: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
+    last_expiry_at: int | None = None
 
 
 class _Conflict(Exception):
@@ -82,6 +99,18 @@ def derive(raw_events: Sequence[Mapping[str, Any]], budget: int = DEFAULT_BUDGET
     return state
 
 
+def _fresh_state_bookkeeping(state: IssueState) -> IssueState:
+    """Moving to another state ends the runs, settled results and infra attempts of the old one."""
+    return replace(
+        state,
+        active_runs=(),
+        settled_runs=frozenset(),
+        settled_reviewers=frozenset(),
+        infra_attempts=MappingProxyType({}),
+        last_expiry_at=None,
+    )
+
+
 def _reason(error: Exception) -> str:
     if isinstance(error, InvalidTransition):
         return f"invalid transition: {error}"
@@ -113,7 +142,7 @@ def _apply(state: IssueState, event: Event) -> IssueState:
                 f"{derived.value}, the event says {target.value}"
             )
         approved = None if target in _UNAPPROVED_TARGETS else state.approved_spec_rev
-        return replace(state, status=target, approved_spec_rev=approved)
+        return replace(_fresh_state_bookkeeping(state), status=target, approved_spec_rev=approved)
     if kind == "counter_charged":
         counters, outcome = state.counters.charge(Cause(event.data["cause"]))
         if outcome is Outcome.BLOCKED:
@@ -122,9 +151,45 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         return replace(state, counters=counters)
     if kind == "counter_reset":
         return replace(state, counters=state.counters.reset(AgentState(event.data["state"])))
+    if kind == "assignment":
+        data = event.data
+        run = ActiveRun(
+            run_id=str(data["run_id"]),
+            runner=str(data["runner"]),
+            state=str(data["state"]),
+            reviewer=data.get("reviewer"),
+            head=data.get("head"),
+            issued_at=int(data["issued_at"]),
+        )
+        return replace(
+            state,
+            active_runs=(*state.active_runs, run),
+            assignments_made=state.assignments_made + 1,
+        )
+    if kind == "lease_expired":
+        data = event.data
+        expired_state = str(data["state"])
+        attempts = {
+            **state.infra_attempts,
+            expired_state: state.infra_attempts.get(expired_state, 0) + 1,
+        }
+        return replace(
+            state,
+            active_runs=tuple(r for r in state.active_runs if r.run_id != data["run_id"]),
+            infra_attempts=MappingProxyType(attempts),
+            last_expiry_at=int(data["at"]),
+        )
     if kind == "handoff_accepted":
         data = event.data
-        state = replace(state, accepted_runs=state.accepted_runs | {str(data["run_id"])})
+        finished = next((r for r in state.active_runs if r.run_id == data["run_id"]), None)
+        state = replace(
+            state,
+            accepted_runs=state.accepted_runs | {str(data["run_id"])},
+            active_runs=tuple(r for r in state.active_runs if r.run_id != data["run_id"]),
+            settled_runs=state.settled_runs | {str(data["run_id"])},
+            settled_reviewers=state.settled_reviewers
+            | ({finished.reviewer} if finished is not None and finished.reviewer else set()),
+        )
         if data.get("state") == "spec" and data.get("artifact_rev") is not None:
             state = replace(state, spec_rev=str(data["artifact_rev"]))
         if data.get("commit_sha") is not None:
@@ -143,7 +208,7 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             raise _Conflict(
                 f"conflict at seq {event.seq}: unblocked but the issue is in {state.status.value}"
             )
-        return replace(state, status=Status(event.data["to"]))
+        return replace(_fresh_state_bookkeeping(state), status=Status(event.data["to"]))
     if kind in _RECORD_ONLY:
         return state
     raise ValueError(f"unknown event kind {kind!r} at seq {event.seq}")
