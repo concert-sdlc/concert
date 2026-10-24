@@ -21,7 +21,7 @@ class GitFacts:
         if sha is not None:
             # a worker pushes its commits to its own WIP ref; the PM advances pm/<issue> later
             wip = f"pm-wip/{handoff.runner}/{issue}/{handoff.run_id}"
-            for ref in (wip, f"pm/{issue}"):
+            for ref in (wip, state.branch or f"pm/{issue}"):
                 try:
                     exists = sha in {c.sha for c in self._github.list_commits(self._base, ref)}
                 except NotFound:

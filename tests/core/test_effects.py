@@ -191,3 +191,9 @@ def test_a_merged_revert_needs_no_more_effects() -> None:
         FAILED, revert_pr=9, revert_head="rv1", revert_ci_passed=True, revert_merge_sha="rm1"
     )
     assert plan_effect(state, 4, "staging", auto_revert=True) is None
+
+
+def test_the_pr_of_a_re_landed_issue_uses_its_new_branch() -> None:
+    state = replace(BRANCHED, status=Status.IMPLEMENTING, branch="pm/4-r1")
+    effect = plan_effect(state, 4, "staging")
+    assert effect is not None and effect.data["head"] == "pm/4-r1"

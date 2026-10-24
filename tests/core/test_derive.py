@@ -446,3 +446,47 @@ def test_verification_failures_start_over_when_the_issue_returns_to_verifying() 
     journey.move("verifying_staging", "implementing", "failed_reverted")
     assert derive(journey.raw()).verify_failures == 0
     assert derive(journey.raw()).verify_failed is False
+
+
+# --- re-landing after an auto-revert -----------------------------------------------------------
+
+
+def reverted_journey() -> Journey:
+    journey = to_in_review().move("in_review", "uat", "clean").move("uat", "human_uat", "passed")
+    journey.add("branch_created", {"branch": "pm/1", "sha": "b0"})
+    journey.add("outcome", {"key": "open_pr", "action": "open_pr", "result": {"number": 7}})
+    journey.add("evidence", {"kind": "uat", "item": None, "head_sha": "h1", "passed": True})
+    journey.add(
+        "handoff_accepted",
+        {"run_id": "r-1", "state": "implementing", "commit_sha": "h1", "artifact_rev": None},
+    )
+    journey.move("human_uat", "integrating", "approve_uat")
+    journey.add("outcome", {"key": "merge", "action": "merge", "result": {"sha": "m1"}})
+    journey.move("integrating", "verifying_staging", "ready_to_merge")
+    journey.add(
+        "outcome",
+        {
+            "key": "revert_pr",
+            "action": "revert_pr",
+            "result": {"number": 9, "branch": "r", "sha": "rv"},
+        },
+    )
+    return journey.move("verifying_staging", "implementing", "failed_reverted")
+
+
+def test_a_reverted_issue_starts_over_on_a_new_branch_generation() -> None:
+    state = derive(reverted_journey().raw())
+    assert state.status is Status.IMPLEMENTING
+    assert state.relands == 1 and state.reland_of == "m1"
+    assert state.branch_base is None and state.head_sha is None
+    assert state.pr_number is None and state.pr_ready is False
+    assert state.merge_sha is None and state.revert_pr is None and state.revert_head is None
+    assert state.revert_ci_passed is None and state.revert_merge_sha is None
+    assert state.evidence == ()
+
+
+def test_the_new_branch_is_recorded_by_name() -> None:
+    journey = reverted_journey()
+    journey.add("branch_created", {"branch": "pm/1-r1", "sha": "b1"})
+    state = derive(journey.raw())
+    assert state.branch == "pm/1-r1" and state.branch_base == "b1"

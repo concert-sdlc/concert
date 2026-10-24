@@ -122,7 +122,6 @@ class _Poll:
         self.facts = facts
         self.now = now
         self.load = load
-        self.branch = f"pm/{issue}"
         self.posted = 0
         self.rejected: list[str] = []
         self.ignored: list[str] = []
@@ -132,6 +131,10 @@ class _Poll:
         self.records: list[EventRecord] = []
         self.handoff_items: list[HandoffComment] = []
         self.state = IssueState()
+
+    @property
+    def branch(self) -> str:
+        return self.state.branch or f"pm/{self.issue}"
 
     # --- the poll ------------------------------------------------------------------------------
 
@@ -174,16 +177,41 @@ class _Poll:
     # --- steps -----------------------------------------------------------------------------------
 
     def _create_branch(self) -> None:
-        """Entering spec creates the issue branch from the base and records its first commit."""
-        if (
-            self.state.status is Status.SPEC
-            and self.state.branch_base is None
-            and self.state.issue_type is not IssueType.REVERT
-        ):
+        """Entering spec creates the issue branch from the base and records its first commit. A
+        re-landed issue gets a new branch whose first commit re-applies the reverted work."""
+        state = self.state
+        if state.branch_base is not None or state.issue_type is IssueType.REVERT:
+            return
+        if state.status is Status.SPEC:
             sha = self.github.get_ref(self.branch) or self.github.create_branch(
                 self.branch, self.config.base_branch
             )
             self._post([Proposed("branch_created", {"branch": self.branch, "sha": sha})])
+        elif state.status is Status.IMPLEMENTING and state.reland_of is not None:
+            name = f"pm/{self.issue}-r{state.relands}"
+            sha = self._reland_branch(name, state.reland_of)
+            self._post([Proposed("branch_created", {"branch": name, "sha": sha})])
+
+    def _reland_branch(self, name: str, reverted_merge: str) -> str:
+        """A branch off the base whose first commit re-applies the changes of the reverted merge
+        (a revert of the revert). Safe to repeat after a crash: each step checks its own result."""
+        if self.github.get_ref(name) is None:
+            self.github.create_branch(name, self.config.base_branch)
+        before = self.github.read_tree(self.github.commit_parents(reverted_merge)[0])
+        merged = self.github.read_tree(reverted_merge)
+        changes = {
+            p: merged.get(p) for p in set(merged) | set(before) if merged.get(p) != before.get(p)
+        }
+        tree = self.github.read_tree(name)
+        if any(tree.get(p) != content for p, content in changes.items()):
+            return self.github.commit(
+                name,
+                f"Re-apply #{self.issue} (revert of the revert)",
+                changes,
+                author=self.config.pm.login,
+                committer=self.config.pm.login,
+            )
+        return self.github.get_ref(name) or ""
 
     def _check_branch(self) -> bool:
         """On every poll the issue branch must be at the last accepted commit: workers push only
@@ -254,7 +282,10 @@ class _Poll:
             if handoff.state not in _COMMITTING or handoff.commit_sha is None:
                 continue
             commits = [
-                c.sha for c in self.github.list_commits(self.config.base_branch, handoff.commit_sha)
+                c.sha
+                for c in self.github.list_commits(
+                    self.state.branch_base or self.config.base_branch, handoff.commit_sha
+                )
             ]
             verdict = check_commit_binding(commits, [*prior, handoff])
             if isinstance(verdict, ForeignCommits):

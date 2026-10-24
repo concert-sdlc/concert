@@ -53,6 +53,7 @@ class World:
         self.fake.seed_branch(heartbeat_ref("vm-1"), {})
         self.pm: GitHubApi = self.fake.client(PM)
         self.pm_identity = PM
+        self.fake_vm1 = VM1
         self.mirror = Mirror(self.pm, author=PM.login)
         self.facts = GitFacts(self.pm, base_branch="staging")
         self.runs = 0

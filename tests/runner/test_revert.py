@@ -150,3 +150,90 @@ def test_a_look_alike_revert_pr_with_extra_changes_is_never_merged() -> None:
     assert result.status is Status.BLOCKED
     assert "not the inverse" in (world.state(issue).note or "")
     assert world.pm.get_ref("staging") == before
+
+
+def reverted_world() -> tuple[World, int]:
+    world, issue, _merge = failed_world()
+    world.poll(issue)
+    world.fake.add_check_run(world.state(issue).revert_head or "", "tests", "success", "w1")
+    world.poll(issue)
+    revert_merge = world.state(issue).revert_merge_sha or ""
+    run = world.assign(issue, head=revert_merge)
+    world.handoff(
+        issue,
+        run,
+        "verifying_staging",
+        "passed",
+        commit_sha=revert_merge,
+        artifact_rev=world.state(issue).approved_spec_rev,
+    )
+    assert world.poll(issue).status is Status.IMPLEMENTING
+    return world, issue
+
+
+def test_a_reverted_issue_gets_a_new_branch_that_re_applies_its_changes_and_a_new_draft_pr() -> (
+    None
+):
+    world, issue = reverted_world()
+    state = world.state(issue)
+    branch = f"pm/{issue}-r1"
+    assert state.branch == branch and state.relands == 1
+    head = world.pm.get_ref(branch)
+    assert head is not None and state.branch_base == head
+    staging = world.pm.get_ref("staging") or ""
+    assert world.pm.read_tree(head)["backend/export.py"] == "def export(): ..."  # re-applied
+    assert world.pm.commit_parents(head) == (staging,)
+    [pr] = [r.pr for r in world.fake.prs.values() if r.pr.head == branch]
+    assert pr.draft and pr.state == "open" and state.pr_number == pr.number
+    assert world.poll(issue).posted == 0
+
+
+def test_the_re_landed_issue_can_go_through_implementation_again() -> None:
+    world, issue = reverted_world()
+    branch = f"pm/{issue}-r1"
+    run = world.assign(issue, head=world.pm.get_ref(branch))
+    ref = f"pm-wip/vm-1/{issue}/{run}"
+    worker = world.fake.client(world.fake_vm1)
+    worker.create_branch(ref, branch)
+    fix = worker.commit(
+        ref, "fix", {"backend/export.py": "def export(): return 1"}, author="vm", committer="vm"
+    )
+    world.handoff(
+        issue,
+        run,
+        "implementing",
+        "done",
+        commit_sha=fix,
+        artifact_rev=world.state(issue).approved_spec_rev,
+        run_commits=[fix],
+    )
+    assert world.poll(issue).status is Status.IN_REVIEW
+    assert world.pm.get_ref(branch) == fix
+    assert world.state(issue).pr_ready is True
+
+
+def test_a_crash_while_building_the_re_landing_branch_recovers() -> None:
+    world, issue, _merge = failed_world()
+    world.poll(issue)
+    world.fake.add_check_run(world.state(issue).revert_head or "", "tests", "success", "w1")
+    world.poll(issue)
+    revert_merge = world.state(issue).revert_merge_sha or ""
+    run = world.assign(issue, head=revert_merge)
+    world.handoff(
+        issue,
+        run,
+        "verifying_staging",
+        "passed",
+        commit_sha=revert_merge,
+        artifact_rev=world.state(issue).approved_spec_rev,
+    )
+    world.fake.tick(1)
+    dying: Any = DiesAfter(world.pm, "commit")  # the re-applying commit lands, nothing is logged
+    with pytest.raises(Crash):
+        poll_issue(dying, world.mirror, issue, world.config, world.facts, now=world.fake.now)
+    branch = f"pm/{issue}-r1"
+    crashed_at = world.pm.get_ref(branch)
+    assert world.state(issue).branch_base is None
+    world.poll(issue)
+    assert world.state(issue).branch_base == crashed_at  # no second re-applying commit
+    assert world.pm.get_ref(branch) == crashed_at

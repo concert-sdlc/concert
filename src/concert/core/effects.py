@@ -56,7 +56,11 @@ def plan_effect(
         and state.status not in _NO_PR_YET
         and state.issue_type is not IssueType.REVERT
     ):
-        data = {"head": f"pm/{issue}", "base": base_branch, "title": f"Concert #{issue}"}
+        data = {
+            "head": state.branch or f"pm/{issue}",
+            "base": base_branch,
+            "title": f"Concert #{issue}",
+        }
         return Effect("open_pr", "open_pr", data, resumed=False)
     if state.pr_number is not None and not state.pr_ready and state.status in _READY_STATES:
         return Effect("ready", "mark_ready", {"number": state.pr_number}, resumed=False)

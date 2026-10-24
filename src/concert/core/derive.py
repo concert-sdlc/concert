@@ -78,6 +78,11 @@ class IssueState:
     last_expiry_at: int | None = None
     note: str | None = None  # why a check blocked the issue
     branch_base: str | None = None  # the branch-creation commit recorded by the PM
+    branch: str | None = None  # the issue branch (pm/<n>, or pm/<n>-r<k> after a re-landing)
+    relands: int = 0  # how many times the merged work was reverted and the issue restarted
+    reland_of: str | None = (
+        None  # the reverted merge commit whose changes the new branch re-applies
+    )
     pending_intents: tuple[Intent, ...] = ()
     pr_number: int | None = None
     pr_ready: bool = False
@@ -137,6 +142,28 @@ def _fresh_state_bookkeeping(state: IssueState) -> IssueState:
     )
 
 
+def _relanded(state: IssueState) -> IssueState:
+    """The merge was reverted: the issue starts over on a new branch with a new PR and fresh
+    evidence. The approved spec still holds; the reverted merge is remembered so the new
+    branch can re-apply its changes."""
+    return replace(
+        state,
+        relands=state.relands + 1,
+        reland_of=state.merge_sha,
+        branch_base=None,
+        head_sha=None,
+        pr_number=None,
+        pr_ready=False,
+        merge_sha=None,
+        revert_pr=None,
+        revert_branch=None,
+        revert_head=None,
+        revert_ci_passed=None,
+        revert_merge_sha=None,
+        evidence=(),
+    )
+
+
 def _reason(error: Exception) -> str:
     if isinstance(error, InvalidTransition):
         return f"invalid transition: {error}"
@@ -169,12 +196,15 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             )
         approved = None if target in _UNAPPROVED_TARGETS else state.approved_spec_rev
         note = event.data.get("note")
-        return replace(
+        moved = replace(
             _fresh_state_bookkeeping(state),
             status=target,
             approved_spec_rev=approved,
             note=str(note) if note is not None else None,
         )
+        if trigger is Trigger.FAILED_REVERTED:
+            return _relanded(moved)
+        return moved
     if kind == "counter_charged":
         counters, outcome = state.counters.charge(Cause(event.data["cause"]))
         if outcome is Outcome.BLOCKED:
@@ -184,7 +214,7 @@ def _apply(state: IssueState, event: Event) -> IssueState:
     if kind == "counter_reset":
         return replace(state, counters=state.counters.reset(AgentState(event.data["state"])))
     if kind == "branch_created":
-        return replace(state, branch_base=str(event.data["sha"]))
+        return replace(state, branch_base=str(event.data["sha"]), branch=str(event.data["branch"]))
     if kind == "assignment":
         data = event.data
         run = ActiveRun(
