@@ -230,3 +230,40 @@ def test_find_pr_returns_the_open_pr_for_a_head_branch(fake: FakeGitHub) -> None
     found = gh.find_pr("pm/1")
     assert found is not None and found.number == number
     assert gh.find_pr("pm/2") is None
+
+
+# --- revert PRs ---------------------------------------------------------------------------------
+
+
+def merged_pr(fake: FakeGitHub) -> tuple[int, str]:
+    number, head = make_pr(fake)
+    gh = fake.client(PM)
+    gh.mark_ready(number)
+    return number, gh.merge_pr(number, expected_head=head)
+
+
+def test_reverting_a_merged_pr_opens_a_ready_pr_that_undoes_it(fake: FakeGitHub) -> None:
+    number, _merge = merged_pr(fake)
+    gh = fake.client(PM)
+    revert = gh.revert_pr(number)
+    assert (revert.base, revert.draft, revert.state) == ("staging", False, "open")
+    head = gh.get_ref(revert.head)
+    assert head is not None
+    tree = gh.read_tree(head)
+    assert "a.py" not in tree and tree["README"] == "x"
+    assert gh.merge_pr(revert.number, expected_head=head)
+    assert "a.py" not in gh.read_tree("staging")
+
+
+def test_only_a_merged_pr_can_be_reverted(fake: FakeGitHub) -> None:
+    number, _head = make_pr(fake)
+    with pytest.raises(Conflict):
+        fake.client(PM).revert_pr(number)
+
+
+def test_a_revert_that_collides_with_later_changes_is_refused(fake: FakeGitHub) -> None:
+    number, _merge = merged_pr(fake)
+    gh = fake.client(PM)
+    gh.commit("staging", "later edit", {"a.py": "changed"}, author="x", committer="x")
+    with pytest.raises(Conflict):
+        gh.revert_pr(number)

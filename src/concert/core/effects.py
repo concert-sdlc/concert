@@ -38,7 +38,11 @@ class Effect:
 
 
 def plan_effect(
-    state: IssueState, issue: int, base_branch: str, gate_ready: bool = False
+    state: IssueState,
+    issue: int,
+    base_branch: str,
+    gate_ready: bool = False,
+    auto_revert: bool = False,
 ) -> Effect | None:
     """`gate_ready`: every merge requirement holds on the current head (the caller evaluates it)."""
     if state.pending_intents:
@@ -66,4 +70,23 @@ def plan_effect(
     ):
         data = {"number": state.pr_number, "expected_head": state.head_sha}
         return Effect("merge", "merge", data, resumed=False)
+    return _plan_revert(state) if auto_revert else None
+
+
+def _plan_revert(state: IssueState) -> Effect | None:
+    """After a final verification failure: open a revert PR, then merge it once its checks pass."""
+    if (
+        state.status is not Status.VERIFYING_STAGING
+        or not state.verify_failed
+        or state.issue_type is not IssueType.CODE
+        or state.revert_merge_sha is not None
+    ):
+        return None
+    if state.revert_pr is None:
+        if state.pr_number is None:
+            return None
+        return Effect("revert_pr", "revert_pr", {"number": state.pr_number}, resumed=False)
+    if state.revert_ci_passed and state.revert_head is not None:
+        data = {"number": state.revert_pr, "expected_head": state.revert_head}
+        return Effect("merge_revert", "merge_revert", data, resumed=False)
     return None

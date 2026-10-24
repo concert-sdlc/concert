@@ -131,3 +131,63 @@ def test_no_merge_is_planned_without_a_ready_pr() -> None:
     state = replace(READY_TO_MERGE, pr_ready=False)
     effect = plan_effect(state, 4, "staging", gate_ready=True)
     assert effect is not None and effect.action == "mark_ready"
+
+
+# --- auto-revert ----------------------------------------------------------------------------------
+
+FAILED = replace(
+    BRANCHED,
+    status=Status.VERIFYING_STAGING,
+    pr_number=7,
+    pr_ready=True,
+    head_sha="h1",
+    merge_sha="m1",
+    verify_failed=True,
+)
+
+
+def test_a_final_failure_under_auto_revert_opens_a_revert_pr() -> None:
+    effect = plan_effect(FAILED, 4, "staging", auto_revert=True)
+    assert effect is not None
+    assert (effect.key, effect.action, dict(effect.data)) == (
+        "revert_pr",
+        "revert_pr",
+        {"number": 7},
+    )
+
+
+def test_no_revert_is_opened_under_the_freeze_policy() -> None:
+    assert plan_effect(FAILED, 4, "staging", auto_revert=False) is None
+
+
+def test_no_revert_is_opened_while_the_failure_is_not_final() -> None:
+    assert plan_effect(replace(FAILED, verify_failed=False), 4, "staging", auto_revert=True) is None
+
+
+def test_only_code_issues_are_auto_reverted() -> None:
+    for kind in (IssueType.HOTFIX, IssueType.REVERT):
+        assert plan_effect(replace(FAILED, issue_type=kind), 4, "staging", auto_revert=True) is None
+
+
+def test_a_green_revert_pr_is_merged_at_its_head() -> None:
+    state = replace(FAILED, revert_pr=9, revert_head="rv1", revert_ci_passed=True)
+    effect = plan_effect(state, 4, "staging", auto_revert=True)
+    assert effect is not None
+    assert (effect.key, effect.action, dict(effect.data)) == (
+        "merge_revert",
+        "merge_revert",
+        {"number": 9, "expected_head": "rv1"},
+    )
+
+
+def test_the_revert_pr_waits_for_its_checks() -> None:
+    for passed in (None, False):
+        state = replace(FAILED, revert_pr=9, revert_head="rv1", revert_ci_passed=passed)
+        assert plan_effect(state, 4, "staging", auto_revert=True) is None
+
+
+def test_a_merged_revert_needs_no_more_effects() -> None:
+    state = replace(
+        FAILED, revert_pr=9, revert_head="rv1", revert_ci_passed=True, revert_merge_sha="rm1"
+    )
+    assert plan_effect(state, 4, "staging", auto_revert=True) is None

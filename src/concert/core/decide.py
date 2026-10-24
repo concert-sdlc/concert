@@ -9,9 +9,9 @@ Gates that need more evidence than a command (`approve uat`, `approve security`,
 protected-path approvals, merge preconditions) are not decided here yet.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from concert.core.commands import Actor, Command
 from concert.core.counters import AgentState, Cause, Outcome
@@ -19,6 +19,9 @@ from concert.core.derive import IssueState
 from concert.core.evidence import GatePolicy, Ready, evaluate_gate
 from concert.core.handoff import Accepted, Handoff, consolidate_reviews
 from concert.core.transitions import IssueType, Status, Trigger, is_terminal, next_status
+
+if TYPE_CHECKING:  # ci imports Proposed from here
+    from concert.core.ci import CheckRun
 
 REVIEWERS = frozenset({"code", "security"})
 
@@ -114,6 +117,12 @@ def _from_handoffs(
     if state.status is Status.IN_REVIEW:
         return _review_round(state, pending)
     first = pending[0]
+    if (
+        state.status is Status.VERIFYING_STAGING
+        and state.revert_merge_sha is not None
+        and first.decision.trigger is Trigger.PASSED
+    ):  # the verified commit is the revert: the issue goes back to implementing
+        return [_accepted(first), *_trigger_events(state, Trigger.FAILED_REVERTED)]
     if state.status is Status.VERIFYING_STAGING and first.handoff.exit == "failed":
         final = state.verify_failures >= verify_reruns
         again = Proposed(
@@ -303,12 +312,41 @@ def plan_merged(state: IssueState) -> list[Proposed]:
     return _trigger_events(state, Trigger.READY_TO_MERGE)
 
 
-def plan_verify_failure(state: IssueState, on_failure: str) -> list[Proposed]:
-    """A final verification failure freezes (blocks) the issue. Under `auto_revert` a plain code
-    issue instead waits for its revert; hotfixes and reverts always freeze, since reverting a
-    revert would re-apply the breaking merge."""
-    if state.status is not Status.VERIFYING_STAGING or not state.verify_failed:
+def plan_revert_ci(
+    state: IssueState, runs: "Sequence[CheckRun]", dod_items: Collection[str]
+) -> list[Proposed]:
+    """Decide whether the auto-revert PR's checks are green: every definition-of-done check
+    finished on the revert head, all successful (clear to merge) or any failed (freeze)."""
+    if (
+        state.status is not Status.VERIFYING_STAGING
+        or state.revert_head is None
+        or state.revert_ci_passed is not None
+    ):
         return []
-    if on_failure == "auto_revert" and state.issue_type is IssueType.CODE:
+    latest = {r.name: r for r in runs if r.head_sha == state.revert_head and r.conclusion}
+    results = [latest[name].conclusion == "success" for name in dod_items if name in latest]
+    if False in results:
+        passed = False
+    elif len(results) == len(dod_items):
+        passed = True
+    else:
+        return []
+    return [Proposed("revert_ci", {"head": state.revert_head, "passed": passed})]
+
+
+def plan_verify_failure(state: IssueState, on_failure: str) -> list[Proposed]:
+    """Freeze (block) the issue when the failure cannot be auto-reverted: the policy is `freeze`,
+    the issue is a hotfix or revert (reverting a revert would re-apply the breaking merge), the
+    revert's checks failed, or the revert commit itself failed verification. Otherwise a code
+    issue under `auto_revert` waits for its revert."""
+    if state.status is not Status.VERIFYING_STAGING:
+        return []
+    revert_failed = state.revert_ci_passed is False
+    unrevertable = (
+        on_failure != "auto_revert"
+        or state.issue_type is not IssueType.CODE
+        or state.revert_merge_sha is not None
+    )
+    if not (revert_failed or (state.verify_failed and unrevertable)):
         return []
     return _trigger_events(state, Trigger.VERIFY_FAILED)

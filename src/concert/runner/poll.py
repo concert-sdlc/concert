@@ -10,6 +10,7 @@ idempotent side effects (creating the issue branch, fast-forwarding it to an acc
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from fnmatch import fnmatch
 from typing import Protocol
 
 from concert.core.assign import Heartbeat, RunnerInfo, expire_leases, plan_assignments
@@ -23,6 +24,7 @@ from concert.core.decide import (
     decide,
     plan_integration,
     plan_merged,
+    plan_revert_ci,
     plan_verify_failure,
 )
 from concert.core.derive import IssueState, derive
@@ -65,6 +67,7 @@ class RunnerConfig:
     base_branch: str
     runners: Sequence[RunnerInfo] = ()  # runners the PM may assign to; empty: no assignments
     gate_policy: GatePolicy | None = None  # None: CI is not read and nothing integrates
+    protected_paths: Sequence[str] = ()  # an auto-revert touching these is never merged by the PM
     on_failure: str = "freeze"  # staging verification: "freeze" or "auto_revert"
     verify_reruns: int = 1  # automatic re-runs of a failed verification (flaky tests)
 
@@ -160,6 +163,7 @@ class _Poll:
         self._intake()
         self._create_branch()  # intake may have moved the issue into spec
         self._evidence()
+        self._revert_ci()
         self._effects()
         self._integrate()
         self._after_merge()
@@ -293,7 +297,11 @@ class _Poll:
         Every action is idempotent, so a pending intent left by a crash is simply run again."""
         for _ in range(4):  # a bound, never a loop on a failing effect
             effect = plan_effect(
-                self.state, self.issue, self.config.base_branch, gate_ready=self._gate_ready()
+                self.state,
+                self.issue,
+                self.config.base_branch,
+                gate_ready=self._gate_ready(),
+                auto_revert=self.config.on_failure == "auto_revert",
             )
             if effect is None:
                 return
@@ -314,6 +322,7 @@ class _Poll:
             if "error" in result:
                 self._block(f"{effect.action} failed: {result['error']}")
                 return
+            self._revert_ci()
 
     def _perform(self, effect: Effect) -> dict[str, int | str | None]:
         data = effect.data
@@ -329,6 +338,10 @@ class _Poll:
             return {"number": number}
         if effect.action == "merge":
             return self._merge(int(data["number"]), str(data["expected_head"]))
+        if effect.action == "revert_pr":
+            return self._open_revert(int(data["number"]))
+        if effect.action == "merge_revert":
+            return self._merge_revert(int(data["number"]), str(data["expected_head"]))
         raise ValueError(f"unknown side effect {effect.action!r}")
 
     def _merge(self, number: int, expected_head: str) -> dict[str, int | str | None]:
@@ -342,6 +355,34 @@ class _Poll:
             return {"sha": self.github.merge_pr(number, expected_head)}
         except Conflict as error:  # includes StaleHead
             return {"error": str(error)}
+
+    def _open_revert(self, number: int) -> dict[str, int | str | None]:
+        branch = f"revert-pr-{number}"
+        try:
+            pr = self.github.find_pr(branch) or self.github.revert_pr(number)
+        except Conflict as error:
+            return {"error": str(error)}
+        return {"number": pr.number, "branch": pr.head, "sha": self.github.get_ref(pr.head)}
+
+    def _merge_revert(self, number: int, expected_head: str) -> dict[str, int | str | None]:
+        """The PM merges its own auto-revert only if it leaves protected paths alone."""
+        base = self.github.read_tree(self.config.base_branch)
+        reverted = self.github.read_tree(expected_head)
+        changed = [p for p in sorted(set(base) | set(reverted)) if base.get(p) != reverted.get(p)]
+        touched = [p for p in changed if any(fnmatch(p, g) for g in self.config.protected_paths)]
+        if touched:
+            return {"error": f"the revert touches protected paths: {', '.join(touched)}"}
+        return self._merge(number, expected_head)
+
+    def _revert_ci(self) -> None:
+        state = self.state
+        policy = self.config.gate_policy
+        if policy is None or state.revert_head is None:
+            return
+        runs = self.github.list_check_runs(state.revert_head)
+        planned = plan_revert_ci(state, runs, policy.dod_items)
+        if planned:
+            self._post(planned)
 
     def _gate_policy(self) -> GatePolicy | None:
         policy = self.config.gate_policy
@@ -407,7 +448,7 @@ class _Poll:
         )
         # staging verification runs on the merge commit; every other run on the issue branch
         head = (
-            self.state.merge_sha
+            self.state.revert_merge_sha or self.state.merge_sha
             if self.state.status is Status.VERIFYING_STAGING
             else self.github.get_ref(self.branch)
         )

@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 
+from concert.core.ci import CheckRun
 from concert.core.commands import Actor, Command, Role
 from concert.core.counters import AgentState
 from concert.core.decide import (
@@ -13,6 +14,7 @@ from concert.core.decide import (
     decide,
     plan_integration,
     plan_merged,
+    plan_revert_ci,
     plan_verify_failure,
 )
 from concert.core.derive import IssueState, derive
@@ -728,3 +730,122 @@ def test_a_revert_failure_freezes_and_is_never_reverted_again() -> None:
 
 def test_nothing_is_planned_before_the_failure_is_final() -> None:
     assert plan_verify_failure(verifying_log().state(), on_failure="freeze") == []
+
+
+# --- auto-revert ----------------------------------------------------------------------------------
+
+
+def reverting_log() -> Log:
+    log = failed_log()
+    log.add(
+        "outcome",
+        {
+            "key": "revert_pr",
+            "action": "revert_pr",
+            "result": {"number": 9, "branch": "revert-pr-7", "sha": "rv1"},
+        },
+    )
+    return log
+
+
+def check(name: str, conclusion: str | None, sha: str = "rv1") -> CheckRun:
+    return CheckRun(name, sha, conclusion, "w1")
+
+
+def test_green_checks_on_the_revert_head_clear_the_revert_for_merging() -> None:
+    log = reverting_log()
+    proposals = plan_revert_ci(log.state(), [check("tests", "success")], frozenset({"tests"}))
+    assert [(p.kind, dict(p.data)) for p in proposals] == [
+        ("revert_ci", {"head": "rv1", "passed": True})
+    ]
+    assert log.apply(proposals).state().revert_ci_passed is True
+
+
+def test_a_failing_check_on_the_revert_head_is_recorded() -> None:
+    log = reverting_log()
+    proposals = plan_revert_ci(log.state(), [check("tests", "failure")], frozenset({"tests"}))
+    assert proposals[0].data["passed"] is False
+
+
+def test_the_revert_waits_for_unfinished_or_missing_checks() -> None:
+    state = reverting_log().state()
+    dod = frozenset({"tests", "lint"})
+    assert plan_revert_ci(state, [check("tests", "success")], dod) == []
+    assert plan_revert_ci(state, [check("tests", None), check("lint", "success")], dod) == []
+
+
+def test_checks_on_another_commit_do_not_count_for_the_revert() -> None:
+    state = reverting_log().state()
+    assert (
+        plan_revert_ci(state, [check("tests", "success", sha="other")], frozenset({"tests"})) == []
+    )
+
+
+def test_a_decided_revert_ci_is_not_decided_again() -> None:
+    log = reverting_log()
+    log.add("revert_ci", {"head": "rv1", "passed": True})
+    assert plan_revert_ci(log.state(), [check("tests", "failure")], frozenset({"tests"})) == []
+
+
+def test_a_revert_ci_failure_freezes_the_issue() -> None:
+    log = reverting_log()
+    log.add("revert_ci", {"head": "rv1", "passed": False})
+    proposals = plan_verify_failure(log.state(), "auto_revert")
+    assert log.apply(proposals).state().status is Status.BLOCKED
+
+
+def merged_revert_log() -> Log:
+    log = reverting_log()
+    log.add("revert_ci", {"head": "rv1", "passed": True})
+    log.add("outcome", {"key": "merge_revert", "action": "merge_revert", "result": {"sha": "rm1"}})
+    return log
+
+
+def test_merging_the_revert_starts_a_fresh_verification() -> None:
+    log = reverting_log()
+    log.add(
+        "handoff_accepted",
+        {"run_id": "r-x", "state": "verifying_staging", "commit_sha": "m1", "artifact_rev": None},
+    )
+    log.add("revert_ci", {"head": "rv1", "passed": True})
+    assert log.state().settled_runs == frozenset({"r-x"}) and log.state().verify_failed
+    log.add("outcome", {"key": "merge_revert", "action": "merge_revert", "result": {"sha": "rm1"}})
+    state = log.state()
+    assert state.revert_merge_sha == "rm1"
+    assert state.verify_failed is False and state.settled_runs == frozenset()
+    assert state.verify_failures == 0
+
+
+def test_a_verified_revert_returns_the_issue_to_implementing() -> None:
+    log = merged_revert_log()
+    proposals = decide(log.state(), [verify_handoff("r-11", "passed")], [])
+    assert kinds(proposals) == ["handoff_accepted", "transition"]
+    assert proposals[1].data["trigger"] == "failed_reverted"
+    assert log.apply(proposals).state().status is Status.IMPLEMENTING
+
+
+def test_a_revert_that_fails_verification_freezes_even_under_auto_revert() -> None:
+    log = merged_revert_log()
+    log.apply(decide(log.state(), [verify_handoff("r-11", "failed")], []))
+    log.apply(decide(log.state(), [verify_handoff("r-12", "failed")], []))
+    assert log.state().verify_failed
+    proposals = plan_verify_failure(log.state(), "auto_revert")
+    assert log.apply(proposals).state().status is Status.BLOCKED
+
+
+def test_merging_the_revert_ends_runs_still_in_flight() -> None:
+    log = reverting_log()
+    log.add(
+        "assignment",
+        {
+            "run_id": "r-z",
+            "runner": "vm-1",
+            "state": "verifying_staging",
+            "reviewer": None,
+            "head": "m1",
+            "issued_at": 1,
+        },
+    )
+    assert len(log.state().active_runs) == 1
+    log.add("outcome", {"key": "merge_revert", "action": "merge_revert", "result": {"sha": "rm1"}})
+    assert log.state().active_runs == ()

@@ -81,6 +81,11 @@ class IssueState:
     pending_intents: tuple[Intent, ...] = ()
     pr_number: int | None = None
     pr_ready: bool = False
+    revert_pr: int | None = None  # the auto-revert PR
+    revert_branch: str | None = None
+    revert_head: str | None = None  # its head commit
+    revert_ci_passed: bool | None = None  # None until the checks on its head are decided
+    revert_merge_sha: str | None = None  # the revert commit on the base branch, once merged
     verify_failures: int = 0  # failed staging verifications so far, re-runs included
     verify_failed: bool = False  # the failure is final: no re-run is left
     merge_sha: str | None = None  # the merge commit on the base branch, once the PM merged
@@ -231,6 +236,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             settled_runs=frozenset(),
             settled_reviewers=frozenset(),
         )
+    if kind == "revert_ci":
+        return replace(state, revert_ci_passed=bool(event.data["passed"]))
     if kind == "verify_failed":
         return replace(state, verify_failed=True)
     if kind == "intent":
@@ -256,6 +263,23 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             return replace(state, pr_number=int(result["number"]))
         if action == "mark_ready":
             return replace(state, pr_ready=True)
+        if action == "revert_pr":
+            return replace(
+                state,
+                revert_pr=int(result["number"]),
+                revert_branch=str(result["branch"]),
+                revert_head=str(result["sha"]),
+            )
+        if action == "merge_revert" and result.get("sha"):
+            return replace(
+                state,
+                revert_merge_sha=str(result["sha"]),
+                verify_failed=False,
+                verify_failures=0,
+                settled_runs=frozenset(),
+                settled_reviewers=frozenset(),
+                active_runs=(),
+            )
         if action == "merge" and result.get("sha"):
             return replace(state, merge_sha=str(result["sha"]))
         return state

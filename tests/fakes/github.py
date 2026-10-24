@@ -277,6 +277,39 @@ class FakeClient:
     def get_pr(self, number: int) -> PullRequest:
         return self._pr(number).pr
 
+    def revert_pr(self, number: int) -> PullRequest:
+        record = self._pr(number)
+        if record.pr.state != "merged" or record.merged_sha is None:
+            raise Conflict(f"pull request #{number} is not merged")
+        merge = self.fake.commits[record.merged_sha]
+        before = self.fake.commits[merge.parents[0]].tree
+        base = record.pr.base
+        tree = dict(self.fake.commits[self.fake.resolve(base)].tree)
+        for path in set(merge.tree) | set(before):
+            if merge.tree.get(path) == before.get(path):
+                continue
+            if tree.get(path) != merge.tree.get(path):
+                raise Conflict(f"revert conflict in {path}")
+            if path in before:
+                tree[path] = before[path]
+            else:
+                tree.pop(path, None)
+        branch = f"revert-pr-{number}"
+        self.create_branch(branch, base)
+        self.fake.new_commit(
+            branch,
+            (self.fake.resolve(base),),
+            f"Revert #{number}",
+            self.actor.login,
+            self.actor.login,
+            tree,
+        )
+        pr = PullRequest(
+            self.fake.next_number(), branch, base, f"Revert #{number}", draft=False, state="open"
+        )
+        self.fake.prs[pr.number] = _Pr(pr)
+        return pr
+
     def find_pr(self, head: str) -> PullRequest | None:
         return next(
             (r.pr for r in self.fake.prs.values() if r.pr.head == head and r.pr.state == "open"),
