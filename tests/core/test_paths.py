@@ -45,3 +45,20 @@ def test_changed_paths_lists_added_removed_and_modified_files_sorted() -> None:
     before = {"a": "1", "b": "2", "c": "3"}
     after = {"a": "1", "b": "changed", "d": "4"}
     assert changed_paths(before, after) == ["b", "c", "d"]
+
+
+class Ided(dict[str, str]):
+    """A tree like the real client's lazy one: it knows blob ids without loading contents."""
+
+    def __init__(self, ids: dict[str, str]) -> None:
+        super().__init__()
+        self.blob_ids = ids
+
+    def __getitem__(self, key: str) -> str:
+        raise AssertionError(f"content of {key} was fetched")
+
+
+def test_trees_with_blob_ids_are_compared_without_loading_contents() -> None:
+    before = Ided({"a": "1", "b": "2"})
+    after = Ided({"a": "1", "b": "3", "c": "4"})
+    assert changed_paths(before, after) == ["b", "c"]
