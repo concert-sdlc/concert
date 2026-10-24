@@ -66,8 +66,10 @@ def render_uat_kit(facts: KitFacts, head: str, evidence: Sequence[Evidence], sum
         lines += [
             "### Admin review required",
             "",
-            "This change touches protected files. An admin must approve the pull request on "
-            "GitHub (a review on this exact commit) before it can merge:",
+            (
+                "This change touches protected files. An admin must approve the pull request "
+                "on GitHub (a review on this exact commit) before it can merge:"
+            ),
             "",
             *(f"- `{path}`" for path in facts.protected_files),
             "",
