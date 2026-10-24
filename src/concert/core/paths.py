@@ -8,6 +8,10 @@ import re
 from collections.abc import Collection, Mapping
 from functools import cache
 
+# GitHub runs a workflow from a pushed branch with the repository's secrets, so agents never push
+# one: the worker drops such edits and the PM refuses a commit that carries one.
+WORKFLOW_PATHS = (".github/workflows/**",)
+
 
 @cache
 def _compile(pattern: str) -> re.Pattern[str]:

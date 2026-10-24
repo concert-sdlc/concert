@@ -13,6 +13,7 @@ from typing import Protocol
 
 from concert.core.derive import ActiveRun, derive
 from concert.core.handoff import RunState
+from concert.core.paths import WORKFLOW_PATHS, matches_any
 from concert.core.spec_hash import spec_tree_hash
 from concert.github.api import GitHubApi, Identity
 from concert.github.comments import extract_events, render_handoff_comment
@@ -123,8 +124,14 @@ class Worker:
         state = RunState(run.state)
         commit = run.head
         commits: tuple[str, ...] = ()
-        if state in _COMMITTING and result.changes and run.head is not None:
-            commit = self._commit(issue, run, result)
+        pushable = {p: c for p, c in result.changes.items() if not matches_any(p, WORKFLOW_PATHS)}
+        proposed = {
+            p: c
+            for p, c in result.changes.items()
+            if matches_any(p, WORKFLOW_PATHS) and c is not None
+        }
+        if state in _COMMITTING and pushable and run.head is not None:
+            commit = self._commit(issue, run, pushable)
             commits = (commit,)
         artifact: str | None = None
         if state is RunState.SPEC and commit is not None:
@@ -144,10 +151,11 @@ class Worker:
             "doubts": list(result.doubts),
             "run_commits": list(commits),
             "reviewer": run.reviewer,
+            "workflow_change_request": proposed,
         }
         self.github.add_comment(issue, render_handoff_comment(raw))
 
-    def _commit(self, issue: int, run: ActiveRun, result: AgentResult) -> str:
+    def _commit(self, issue: int, run: ActiveRun, changes: Mapping[str, str | None]) -> str:
         ref = f"pm-wip/{self.runner}/{issue}/{run.run_id}"
         existing = self.github.get_ref(ref)
         if existing is not None:  # a retry after a crash: keep what the first attempt pushed
@@ -157,7 +165,7 @@ class Worker:
         return self.github.commit(
             ref,
             f"{run.state}: #{issue} ({run.run_id})",
-            result.changes,
+            changes,
             author=self.runner,
             committer=self.runner,
         )

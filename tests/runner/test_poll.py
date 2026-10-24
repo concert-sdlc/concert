@@ -335,3 +335,27 @@ def test_a_broken_event_log_is_explained_without_offering_an_unblock() -> None:
     ]
     assert len(notes) == 1
     assert "seq 1" in notes[0] and "/unblock" not in notes[0] and "has to look at this" in notes[0]
+
+
+def test_a_commit_that_touches_a_workflow_file_blocks_the_issue() -> None:
+    world = World()
+    issue = world.new_issue()
+    to_spec_approval(world, issue)
+    _sha, spec_hash = ("", world.state(issue).spec_rev or "")
+    world.say(ALICE, issue, f"/approve spec {spec_hash}")
+    world.poll(issue)
+    run = world.assign(issue, head=world.pm.get_ref(f"pm/{issue}"))
+    bad = world.wip_commit(issue, run, {"app.py": "x", ".github/workflows/steal.yml": "on: push"})
+    world.handoff(
+        issue,
+        run,
+        "implementing",
+        "done",
+        commit_sha=bad,
+        artifact_rev=spec_hash,
+        run_commits=[bad],
+    )
+    result = world.poll(issue)
+    assert result.status is Status.BLOCKED
+    assert ".github/workflows/steal.yml" in (world.state(issue).note or "")
+    assert world.pm.get_ref(f"pm/{issue}") != bad  # never advanced to the unsafe commit

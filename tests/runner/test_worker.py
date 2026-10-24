@@ -186,3 +186,45 @@ def test_the_agent_receives_the_humans_answers() -> None:
     agent = Scripted()
     worker(world, agent).run_once(issue, now=world.fake.now)
     assert agent.tasks[0].answers == ("CSV",)
+
+
+# --- workflow files ---------------------------------------------------------------------------------
+
+
+def test_workflow_edits_are_never_pushed_and_are_reported_as_a_change_request() -> None:
+    world = World()
+    issue = world.new_issue()
+    world.say(ALICE, issue, "/dispatch")
+    world.poll(issue)
+    run = world.assign(issue, head=None)
+    world.handoff(issue, run, "triage", "spec")
+    world.poll(issue)
+    branch_head = world.pm.get_ref(f"pm/{issue}")
+    run = world.assign(issue, head=branch_head)
+    changes = {**spec_files(issue), ".github/workflows/evil.yml": "on: push\njobs: {}\n"}
+    agent = Scripted({"spec": AgentResult(exit="ready_for_approval", changes=changes)})
+    worker(world, agent).run_once(issue, now=world.fake.now)
+    handoff = handoffs(world, issue)[-1]
+    wip = world.pm.get_ref(f"pm-wip/vm-1/{issue}/{run}") or ""
+    assert ".github/workflows/evil.yml" not in world.pm.read_tree(wip)
+    assert handoff.workflow_change_request == {".github/workflows/evil.yml": "on: push\njobs: {}\n"}
+    assert "docs/specs/" in "".join(world.pm.read_tree(wip))  # the rest is pushed
+
+
+def test_a_run_that_only_touches_workflows_pushes_nothing() -> None:
+    world = World()
+    issue = world.new_issue()
+    world.say(ALICE, issue, "/dispatch")
+    world.poll(issue)
+    run = world.assign(issue, head=None)
+    world.handoff(issue, run, "triage", "spec")
+    world.poll(issue)
+    branch_head = world.pm.get_ref(f"pm/{issue}")
+    run = world.assign(issue, head=branch_head)
+    agent = Scripted(
+        {"spec": AgentResult(exit="needs_input", changes={".github/workflows/x.yml": "x"})}
+    )
+    worker(world, agent).run_once(issue, now=world.fake.now)
+    handoff = handoffs(world, issue)[-1]
+    assert handoff.commit_sha == branch_head and handoff.run_commits == ()
+    assert world.pm.get_ref(f"pm-wip/vm-1/{issue}/{run}") is None

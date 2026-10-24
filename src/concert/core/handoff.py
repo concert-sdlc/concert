@@ -50,6 +50,9 @@ class Handoff:
     rebases: Mapping[str, str] = field(
         default_factory=lambda: MappingProxyType({})
     )  # old -> new SHA
+    workflow_change_request: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType({})
+    )  # path -> proposed content; never pushed, an admin decides
 
 
 def _string(raw: Mapping[str, Any], key: str) -> str:
@@ -122,6 +125,7 @@ def _parse_v1(raw: Mapping[str, Any]) -> Handoff:
         run_commits=_strings(raw, "run_commits"),
         reviewer=_nullable_string(raw, "reviewer"),
         rebases=_string_map(raw, "rebases"),
+        workflow_change_request=_string_map(raw, "workflow_change_request"),
     )
 
 

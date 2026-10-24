@@ -51,7 +51,7 @@ from concert.core.kits import (
     render_spec_kit,
     render_uat_kit,
 )
-from concert.core.paths import changed_paths, matches_any
+from concert.core.paths import WORKFLOW_PATHS, changed_paths, matches_any
 from concert.core.transitions import IssueType, Status, Trigger, is_terminal
 from concert.github.api import Comment, Conflict, GitHubApi, Identity
 from concert.github.comments import (
@@ -321,7 +321,7 @@ class _Poll:
             else:
                 self.invalid.append(f"comment {item.comment_id}: {decision.reason}")
 
-        if self._foreign_commits(accepted):
+        if self._foreign_commits(accepted) or self._workflow_edits(accepted):
             return
 
         valid = self._valid_commands(all_comments)
@@ -358,6 +358,25 @@ class _Poll:
             if text:
                 found.append(Answer(comment.id, comment.author.user_id, text))
         return found
+
+    def _workflow_edits(self, accepted: Sequence[AcceptedHandoff]) -> bool:
+        """Workflow files run with repository secrets as soon as a branch is pushed, so a commit
+        that touches one is never accepted: they change only through an admin-approved workflow."""
+        base = self.state.branch_base
+        for item in accepted:
+            commit = item.handoff.commit_sha
+            if item.handoff.state not in _COMMITTING or commit is None or base is None:
+                continue
+            touched = [
+                p
+                for p in changed_paths(self.github.read_tree(base), self.github.read_tree(commit))
+                if matches_any(p, WORKFLOW_PATHS)
+            ]
+            if touched:
+                return self._block(
+                    f"workflow files changed outside an approved workflow: {', '.join(touched)}"
+                )
+        return False
 
     def _foreign_commits(self, accepted: Sequence[AcceptedHandoff]) -> bool:
         """Every commit a committing run brings must be one the worker reported."""
