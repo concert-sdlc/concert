@@ -1,0 +1,21 @@
+README.md
+  s_4aba28ccdf2cb3::t_f7dd1f63c785cd 1-14
+docs/STATUS.md
+  s_4aba28ccdf2cb3::t_668b04f2ee6219 1-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "80834c36c55c9f7a4af2fc9dea91a890353c6c92",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
