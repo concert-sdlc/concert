@@ -123,7 +123,7 @@ def test_no_merge_is_planned_twice() -> None:
 
 
 def test_no_merge_is_planned_outside_integrating() -> None:
-    state = replace(READY_TO_MERGE, status=Status.HUMAN_UAT)
+    state = replace(READY_TO_MERGE, status=Status.HUMAN_UAT, kits_posted=frozenset({"kit:uat:h1"}))
     assert plan_effect(state, 4, "staging", gate_ready=True) is None
 
 
@@ -197,3 +197,46 @@ def test_the_pr_of_a_re_landed_issue_uses_its_new_branch() -> None:
     state = replace(BRANCHED, status=Status.IMPLEMENTING, branch="pm/4-r1")
     effect = plan_effect(state, 4, "staging")
     assert effect is not None and effect.data["head"] == "pm/4-r1"
+
+
+# --- kits -------------------------------------------------------------------------------------------
+
+
+def test_the_spec_kit_is_posted_once_the_spec_awaits_approval() -> None:
+    state = replace(BRANCHED, pr_number=7, spec_rev="s1")
+    effect = plan_effect(state, 4, "staging")
+    assert effect is not None
+    assert (effect.key, effect.action, dict(effect.data)) == (
+        "kit:spec:s1",
+        "post_kit",
+        {"kind": "spec", "rev": "s1"},
+    )
+
+
+def test_a_posted_kit_is_not_posted_again_but_a_new_revision_gets_a_new_kit() -> None:
+    state = replace(BRANCHED, pr_number=7, spec_rev="s1", kits_posted=frozenset({"kit:spec:s1"}))
+    assert plan_effect(state, 4, "staging") is None
+    changed = replace(state, spec_rev="s2")
+    effect = plan_effect(changed, 4, "staging")
+    assert effect is not None and effect.key == "kit:spec:s2"
+
+
+def test_the_uat_kit_is_posted_for_the_head_when_the_human_gate_opens() -> None:
+    state = replace(BRANCHED, status=Status.HUMAN_UAT, pr_number=7, pr_ready=True, head_sha="h1")
+    assert plan_effect(state, 4, "staging") is None  # the automated evidence is not complete yet
+    effect = plan_effect(state, 4, "staging", awaiting_human=True)
+    assert effect is not None
+    assert (effect.key, dict(effect.data)) == ("kit:uat:h1", {"kind": "uat", "rev": "h1"})
+
+
+def test_no_uat_kit_without_a_head_and_none_for_other_states() -> None:
+    gate = replace(BRANCHED, status=Status.HUMAN_UAT, pr_number=7, pr_ready=True)
+    assert plan_effect(gate, 4, "staging", awaiting_human=True) is None
+    review = replace(gate, status=Status.IN_REVIEW, head_sha="h1")
+    assert plan_effect(review, 4, "staging", awaiting_human=True) is None
+
+
+def test_the_pr_comes_before_the_kit() -> None:
+    state = replace(BRANCHED, spec_rev="s1")  # no PR yet
+    effect = plan_effect(state, 4, "staging")
+    assert effect is not None and effect.action == "open_pr"

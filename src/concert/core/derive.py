@@ -84,6 +84,7 @@ class IssueState:
         None  # the reverted merge commit whose changes the new branch re-applies
     )
     pending_intents: tuple[Intent, ...] = ()
+    kits_posted: frozenset[str] = frozenset()  # keys of the gate kits already posted
     pr_number: int | None = None
     pr_ready: bool = False
     revert_pr: int | None = None  # the auto-revert PR
@@ -295,6 +296,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         )
         if action == "open_pr":
             return replace(state, pr_number=int(result["number"]))
+        if action == "post_kit":
+            return replace(state, kits_posted=state.kits_posted | {key})
         if action == "mark_ready":
             return replace(state, pr_ready=True)
         if action == "revert_pr":

@@ -510,3 +510,11 @@ def test_a_failed_verification_freezes_the_queue_until_the_issue_is_unblocked() 
     assert derive(journey.raw()).froze_queue is True
     journey.add("unblocked", {"to": "implementing"})
     assert derive(journey.raw()).froze_queue is False
+
+
+def test_a_kit_outcome_remembers_the_kit_was_posted() -> None:
+    journey = Journey().add("created", {"issue_type": "code"})
+    journey.add("intent", {"key": "kit:spec:s1", "action": "post_kit", "kind": "spec", "rev": "s1"})
+    journey.add("outcome", {"key": "kit:spec:s1", "result": {"comment_id": 5}})
+    state = derive(journey.raw())
+    assert state.kits_posted == frozenset({"kit:spec:s1"}) and state.pending_intents == ()

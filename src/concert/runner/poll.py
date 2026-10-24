@@ -38,6 +38,7 @@ from concert.core.handoff import (
     RunState,
     accept_handoff,
 )
+from concert.core.kits import KitFacts, kit_marker, render_spec_kit, render_uat_kit
 from concert.core.paths import changed_paths, matches_any
 from concert.core.transitions import IssueType, Status, Trigger, is_terminal
 from concert.github.api import Comment, Conflict, GitHubApi, Identity
@@ -336,6 +337,7 @@ class _Poll:
                 self.issue,
                 self.config.base_branch,
                 gate_ready=self._gate_ready(),
+                awaiting_human=self._awaiting_human(),
                 auto_revert=self.config.on_failure == "auto_revert",
             )
             if effect is None:
@@ -373,6 +375,8 @@ class _Poll:
             return {"number": number}
         if effect.action == "merge":
             return self._merge(int(data["number"]), str(data["expected_head"]))
+        if effect.action == "post_kit":
+            return self._post_kit(str(data["kind"]), str(data["rev"]))
         if effect.action == "revert_pr":
             return self._open_revert(int(data["number"]))
         if effect.action == "merge_revert":
@@ -392,6 +396,39 @@ class _Poll:
             return {"sha": self.github.merge_pr(number, expected_head)}
         except Conflict as error:  # includes StaleHead
             return {"error": str(error)}
+
+    def _post_kit(self, kind: str, revision: str) -> dict[str, int | str | None]:
+        """Post the gate kit unless this revision's kit is already there (a crash may have hidden it)."""
+        marker = kit_marker(kind, revision)
+        for comment in self.github.list_comments(self.issue):
+            if comment.author.user_id == self.config.pm.user_id and marker in comment.body:
+                return {"comment_id": comment.id}
+        state = self.state
+        ref = state.head_sha or self.branch
+        facts = self._kit_facts()
+        if kind == "spec":
+            summary = self.github.read_file(ref, f"docs/specs/{self.issue}/spec.md") or ""
+            body = render_spec_kit(facts, revision, summary)
+        else:
+            summary = self.github.read_file(ref, f"docs/specs/{self.issue}/uat.md") or ""
+            body = render_uat_kit(facts, revision, state.evidence, summary)
+        return {"comment_id": self.github.add_comment(self.issue, body).id}
+
+    def _kit_facts(self) -> KitFacts:
+        policy = self._gate_policy()
+        touched = self._changed_paths()
+        if not touched and self.state.branch_base is not None:
+            head = self.state.head_sha or self.github.get_ref(self.branch)
+            if head is not None:
+                touched = changed_paths(
+                    self.github.read_tree(self.state.branch_base), self.github.read_tree(head)
+                )
+        return KitFacts(
+            issue=self.issue,
+            changed_files=touched,
+            security_sensitive=policy.security_sensitive if policy else False,
+            protected_files=[p for p in touched if matches_any(p, self.config.protected_paths)],
+        )
 
     def _open_revert(self, number: int) -> dict[str, int | str | None]:
         branch = f"revert-pr-{number}"
@@ -468,6 +505,17 @@ class _Poll:
         planned = plan_review_evidence(state.head_sha, reviews, state.evidence, policy.admins)
         if planned:
             self._post(planned)
+
+    def _awaiting_human(self) -> bool:
+        """Every automated requirement holds; only human approvals are still missing."""
+        policy = self._gate_policy()
+        if policy is None or self.state.head_sha is None:
+            return False
+        verdict = evaluate_gate(self.state.head_sha, self.state.evidence, policy)
+        if isinstance(verdict, Ready):
+            return True
+        human = ("approval:", "admin_review")
+        return not verdict.failing and all(item.startswith(human) for item in verdict.missing)
 
     def _gate_ready(self) -> bool:
         policy = self._gate_policy()

@@ -43,8 +43,10 @@ def plan_effect(
     base_branch: str,
     gate_ready: bool = False,
     auto_revert: bool = False,
+    awaiting_human: bool = False,
 ) -> Effect | None:
-    """`gate_ready`: every merge requirement holds on the current head (the caller evaluates it)."""
+    """`gate_ready`: every merge requirement holds on the current head; `awaiting_human`: only human
+    approvals are still missing (the caller evaluates both)."""
     if state.pending_intents:
         pending = state.pending_intents[0]
         return Effect(pending.key, pending.action, pending.data, resumed=True)
@@ -64,6 +66,9 @@ def plan_effect(
         return Effect("open_pr", "open_pr", data, resumed=False)
     if state.pr_number is not None and not state.pr_ready and state.status in _READY_STATES:
         return Effect("ready", "mark_ready", {"number": state.pr_number}, resumed=False)
+    kit = _plan_kit(state, awaiting_human)
+    if kit is not None:
+        return kit
     if (
         state.status is Status.INTEGRATING
         and gate_ready
@@ -98,3 +103,23 @@ def _plan_revert(state: IssueState) -> Effect | None:
         }
         return Effect("merge_revert", "merge_revert", data, resumed=False)
     return None
+
+
+def _plan_kit(state: IssueState, awaiting_human: bool) -> Effect | None:
+    """The human gates each get one kit per revision they ask the human to approve."""
+    revision: str | None = None
+    kind = ""
+    if state.status is Status.SPEC_APPROVAL:
+        kind, revision = "spec", state.spec_rev
+    elif (
+        state.status is Status.HUMAN_UAT
+        and state.issue_type is not IssueType.REVERT
+        and awaiting_human
+    ):
+        kind, revision = "uat", state.head_sha
+    if revision is None:
+        return None
+    key = f"kit:{kind}:{revision}"
+    if key in state.kits_posted:
+        return None
+    return Effect(key, "post_kit", {"kind": kind, "rev": revision}, resumed=False)

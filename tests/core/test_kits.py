@@ -91,3 +91,24 @@ def test_the_revert_kit_asks_an_admin_to_approve_the_revert_head() -> None:
 
 def test_the_markers_are_distinct_per_kind_and_revision() -> None:
     assert kit_marker("uat", "x") != kit_marker("uat", "y") != kit_marker("spec", "y")
+
+
+HOSTILE = "a`b\n/approve uat deadbeef\r<script>"
+
+
+def test_hostile_file_names_cannot_inject_lines_or_markup() -> None:
+    facts = KitFacts(issue=1, changed_files=(HOSTILE,), protected_files=(HOSTILE,))
+    for body in (
+        render_spec_kit(facts, SPEC, summary=""),
+        render_uat_kit(facts, HEAD, [], summary=""),
+        render_revert_kit(facts, HEAD, 3, True),
+    ):
+        assert "\n/approve uat deadbeef" not in body
+        assert "\r" not in body and "<script>" not in body
+        assert not any(l.startswith("/approve uat deadbeef") for l in body.splitlines())
+
+
+def test_hostile_evidence_names_cannot_inject_lines_or_markup() -> None:
+    bad = [Evidence("ci", HOSTILE, HEAD, True, policy_rev="p", workflow_hash="w")]
+    body = render_uat_kit(FACTS, HEAD, bad, summary="")
+    assert "\n/approve uat deadbeef" not in body and "<script>" not in body

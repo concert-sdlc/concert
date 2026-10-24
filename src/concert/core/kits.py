@@ -71,7 +71,7 @@ def render_uat_kit(facts: KitFacts, head: str, evidence: Sequence[Evidence], sum
                 "on GitHub (a review on this exact commit) before it can merge:"
             ),
             "",
-            *(f"- `{path}`" for path in facts.protected_files),
+            *(f"- {_code(path)}" for path in facts.protected_files),
             "",
         ]
     lines += [
@@ -108,10 +108,18 @@ def render_revert_kit(facts: KitFacts, head: str, reverts: int, ci_passed: bool)
     )
 
 
+def _code(text: str) -> str:
+    """A code span for text we do not control (a file or check name): no backticks, no line
+    breaks or control characters, no markup."""
+    cleaned = "".join(f"\\x{ord(c):02x}" if ord(c) < 0x20 or ord(c) == 0x7F else c for c in text)
+    cleaned = cleaned.replace("`", "'").replace("<", "&lt;").replace(">", "&gt;")
+    return f"`{cleaned}`"
+
+
 def _files(facts: KitFacts) -> list[str]:
     if not facts.changed_files:
         return []
-    return ["### Changed files", "", *(f"- `{path}`" for path in facts.changed_files), ""]
+    return ["### Changed files", "", *(f"- {_code(path)}" for path in facts.changed_files), ""]
 
 
 def _evidence_lines(head: str, evidence: Sequence[Evidence]) -> list[str]:
@@ -122,7 +130,7 @@ def _evidence_lines(head: str, evidence: Sequence[Evidence]) -> list[str]:
     if not latest:
         return ["- nothing recorded for this commit yet"]
     return [
-        f"- {kind}{f' `{name}`' if name else ''}: {'passed' if item.passed else 'failed'}"
+        f"- {kind}{f' {_code(name)}' if name else ''}: {'passed' if item.passed else 'failed'}"
         for (kind, name), item in sorted(latest.items(), key=lambda kv: (kv[0][0], kv[0][1] or ""))
     ]
 
