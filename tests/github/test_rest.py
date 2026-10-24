@@ -604,3 +604,27 @@ def test_a_workflow_file_is_hashed_once_per_commit() -> None:
 def test_missing_things_raise_not_found() -> None:
     with pytest.raises(NotFound):
         client(Api()).get_issue(1)
+
+
+def test_open_issues_exclude_pull_requests() -> None:
+    api = Api()
+    api.on(
+        "GET",
+        "/repos/acme/app/issues",
+        (200, [issue_json(3), issue_json(5, pull_request={}), issue_json(2)]),
+    )
+    assert client(api).list_open_issues() == [2, 3]
+    assert api.requests[0][1].startswith("/repos/acme/app/issues?state=open")
+
+
+def test_an_orphan_branch_is_a_parentless_commit_and_a_ref() -> None:
+    api = Api()
+    api.on("POST", "/repos/acme/app/git/trees", (201, {"sha": "T1"}))
+    api.on("POST", "/repos/acme/app/git/commits", (201, {"sha": SHA2}))
+    api.on("POST", "/repos/acme/app/git/refs", (201, {}))
+    assert client(api).create_orphan_branch("concert-events", {"README": "x"}, "init", "pm") == SHA2
+    tree = api.requests[0][2]
+    assert "base_tree" not in tree and tree["tree"][0]["path"] == "README"
+    commit = api.requests[1][2]
+    assert commit["parents"] == [] and commit["tree"] == "T1"
+    assert api.requests[2][2] == {"ref": "refs/heads/concert-events", "sha": SHA2}

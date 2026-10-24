@@ -144,6 +144,9 @@ class FakeClient:
         except KeyError:
             raise NotFound(f"no issue #{number}") from None
 
+    def list_open_issues(self) -> Sequence[int]:
+        return sorted(n for n, i in self.fake.issues.items() if i.state == "open")
+
     def close_issue(self, number: int) -> Issue:
         return self._set_state(number, "closed")
 
@@ -218,6 +221,13 @@ class FakeClient:
             else:
                 tree[path] = content
         return self.fake.new_commit(branch, (head,), message, author, committer, tree)
+
+    def create_orphan_branch(
+        self, name: str, files: Mapping[str, str], message: str, author: str
+    ) -> str:
+        if name in self.fake.refs:
+            raise Conflict(f"branch {name!r} already exists")
+        return self.fake.new_commit(name, (), message, author, author, dict(files))
 
     def get_ref(self, name: str) -> str | None:
         return self.fake.refs.get(name)

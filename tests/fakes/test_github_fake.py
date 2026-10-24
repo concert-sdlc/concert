@@ -267,3 +267,18 @@ def test_a_revert_that_collides_with_later_changes_is_refused(fake: FakeGitHub) 
     gh.commit("staging", "later edit", {"a.py": "changed"}, author="x", committer="x")
     with pytest.raises(Conflict):
         gh.revert_pr(number)
+
+
+def test_open_issues_are_listed_without_closed_ones(fake: FakeGitHub) -> None:
+    gh = fake.client(ALICE)
+    first, second = gh.create_issue("a", "").number, gh.create_issue("b", "").number
+    gh.close_issue(first)
+    assert gh.list_open_issues() == [second]
+
+
+def test_an_orphan_branch_has_no_parent_and_cannot_be_created_twice(fake: FakeGitHub) -> None:
+    gh = fake.client(PM)
+    sha = gh.create_orphan_branch("concert-events", {"README": "x"}, "init", "pm")
+    assert gh.commit_parents(sha) == () and gh.read_tree(sha) == {"README": "x"}
+    with pytest.raises(Conflict):
+        gh.create_orphan_branch("concert-events", {}, "again", "pm")

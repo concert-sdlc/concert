@@ -7,7 +7,7 @@ or verified, and while a failed verification has frozen it; reverts and hotfixes
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from concert.core.derive import IssueState
 from concert.core.queue import QueueEntry, pick_queue_head
@@ -23,6 +23,7 @@ _HOLDING = frozenset({Status.INTEGRATING, Status.VERIFYING_STAGING})
 class CycleResult:
     results: Mapping[int, PollResult]
     head: int | None  # the issue allowed to integrate in this cycle
+    errors: Mapping[int, str] = field(default_factory=dict[int, str])  # polls that failed
 
     @property
     def states(self) -> dict[int, IssueState]:
@@ -42,27 +43,31 @@ def run_cycle(
     """`known`: the states seen in the previous cycle, so an issue can tell whether the issues
     it waits on have landed (an issue not seen yet counts as unfinished)."""
     results: dict[int, PollResult] = {}
+    errors: dict[int, str] = {}
     for n in issues:
         others = {**(known or {}), **{m: r.state for m, r in results.items()}}
-        results[n] = poll_issue(
-            github, mirror, n, config, facts, now, at_queue_head=False, others=others
-        )
+        try:
+            results[n] = poll_issue(
+                github, mirror, n, config, facts, now, at_queue_head=False, others=others
+            )
+        except Exception as error:  # noqa: BLE001  one issue's failure must not stop the others
+            errors[n] = f"{type(error).__name__}: {error}"
     states = {n: r.state for n, r in results.items()}
     busy = any(s.status in _HOLDING for s in states.values())
     frozen = any(s.froze_queue and s.status is Status.BLOCKED for s in states.values())
     waiting = [
         QueueEntry(n, states[n].issue_type, states[n].dispatched_at)
         for n in issues
-        if results[n].ready_for_integration
+        if n in results and results[n].ready_for_integration
     ]
     chosen = pick_queue_head(waiting, busy=busy, frozen=frozen)
     if chosen is None:
-        return CycleResult(results, None)
+        return CycleResult(results, None, errors)
     others = {**(known or {}), **states}
-    results = {
-        **results,
-        chosen.number: poll_issue(
+    try:
+        results[chosen.number] = poll_issue(
             github, mirror, chosen.number, config, facts, now, at_queue_head=True, others=others
-        ),
-    }
-    return CycleResult(results, chosen.number)
+        )
+    except Exception as error:  # noqa: BLE001
+        errors[chosen.number] = f"{type(error).__name__}: {error}"
+    return CycleResult(results, chosen.number, errors)

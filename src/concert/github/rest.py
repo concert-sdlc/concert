@@ -89,6 +89,10 @@ class RestGitHub:
     def get_issue(self, number: int) -> Issue:
         return _issue(self.http.json("GET", self._repo(f"/issues/{number}")))
 
+    def list_open_issues(self) -> Sequence[int]:
+        pages = self.http.paged(self._repo("/issues"), {"state": "open", "per_page": 100})
+        return sorted(int(raw["number"]) for raw in pages if "pull_request" not in raw)
+
     def close_issue(self, number: int) -> Issue:
         return _issue(
             self.http.json(
@@ -203,6 +207,29 @@ class RestGitHub:
         sha = self._sha_of(from_ref)
         self.http.json("POST", self._repo("/git/refs"), {"ref": f"refs/heads/{name}", "sha": sha})
         return sha
+
+    def create_orphan_branch(
+        self, name: str, files: Mapping[str, str], message: str, author: str
+    ) -> str:
+        entries = [
+            {"path": p, "mode": "100644", "type": "blob", "content": c} for p, c in files.items()
+        ]
+        tree = self.http.json("POST", self._repo("/git/trees"), {"tree": entries})
+        created = self.http.json(
+            "POST",
+            self._repo("/git/commits"),
+            {
+                "message": message,
+                "tree": tree["sha"],
+                "parents": [],
+                "author": _person(author),
+                "committer": _person(author),
+            },
+        )
+        self.http.json(
+            "POST", self._repo("/git/refs"), {"ref": f"refs/heads/{name}", "sha": created["sha"]}
+        )
+        return str(created["sha"])
 
     def get_ref(self, name: str) -> str | None:
         try:
