@@ -11,6 +11,7 @@ import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 
+from concert.core.ci import CheckRun
 from concert.core.commit_binding import CommitMeta
 from concert.github.api import (
     Comment,
@@ -53,6 +54,7 @@ class FakeGitHub:
     commits: dict[str, _Commit] = field(default_factory=dict[str, _Commit])
     refs: dict[str, str] = field(default_factory=dict[str, str])
     prs: dict[int, _Pr] = field(default_factory=dict[int, _Pr])
+    check_runs: list[CheckRun] = field(default_factory=list[CheckRun])
 
     def tick(self, seconds: int) -> None:
         self.now += seconds
@@ -63,6 +65,12 @@ class FakeGitHub:
     def seed_branch(self, name: str, files: Mapping[str, str]) -> str:
         """Create a branch with a root commit (test setup)."""
         return self.new_commit(name, (), "seed", "seed", "seed", dict(files))
+
+    def add_check_run(
+        self, sha: str, name: str, conclusion: str | None, workflow_hash: str
+    ) -> None:
+        """Test setup: a CI check run on a commit (conclusion None = still running)."""
+        self.check_runs.append(CheckRun(name, sha, conclusion, workflow_hash))
 
     # --- internals ---------------------------------------------------------------------------
 
@@ -245,6 +253,11 @@ class FakeClient:
 
     def commit_parents(self, sha: str) -> tuple[str, ...]:
         return self.fake.commits[self.fake.resolve(sha)].parents
+
+    # --- checks ------------------------------------------------------------------------------
+
+    def list_check_runs(self, sha: str) -> Sequence[CheckRun]:
+        return [run for run in self.fake.check_runs if run.head_sha == sha]
 
     # --- pull requests -------------------------------------------------------------------------
 

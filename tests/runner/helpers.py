@@ -59,10 +59,19 @@ class World:
     def new_issue(self) -> int:
         return self.fake.client(ALICE).create_issue("Export CSV", "Please").number
 
-    def poll(self, issue: int, load: dict[str, int] | None = None) -> PollResult:
+    def poll(
+        self, issue: int, load: dict[str, int] | None = None, at_queue_head: bool = True
+    ) -> PollResult:
         self.fake.tick(1)
         return poll_issue(
-            self.pm, self.mirror, issue, self.config, self.facts, now=self.fake.now, load=load
+            self.pm,
+            self.mirror,
+            issue,
+            self.config,
+            self.facts,
+            now=self.fake.now,
+            load=load,
+            at_queue_head=at_queue_head,
         )
 
     def heartbeat(self, *run_ids: str) -> None:

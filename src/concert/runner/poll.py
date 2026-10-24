@@ -13,11 +13,13 @@ from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 from concert.core.assign import Heartbeat, RunnerInfo, expire_leases, plan_assignments
+from concert.core.ci import plan_ci_evidence
 from concert.core.commands import IssueContext, Role, Valid, validate_command
 from concert.core.commit_binding import ForeignCommits, check_commit_binding
-from concert.core.decide import AcceptedHandoff, Proposed, ValidCommand, decide
+from concert.core.decide import AcceptedHandoff, Proposed, ValidCommand, decide, plan_integration
 from concert.core.derive import IssueState, derive
 from concert.core.events import Event, append_event, parse_event
+from concert.core.evidence import GatePolicy
 from concert.core.handoff import (
     Accepted,
     Handoff,
@@ -53,6 +55,7 @@ class RunnerConfig:
     budget: int
     base_branch: str
     runners: Sequence[RunnerInfo] = ()  # runners the PM may assign to; empty: no assignments
+    gate_policy: GatePolicy | None = None  # None: CI is not read and nothing integrates
 
 
 class FactsProvider(Protocol):
@@ -80,8 +83,9 @@ def poll_issue(
     facts: FactsProvider,
     now: int = 0,
     load: Mapping[str, int] | None = None,
+    at_queue_head: bool = True,
 ) -> PollResult:
-    return _Poll(github, mirror, issue, config, facts, now, load).run()
+    return _Poll(github, mirror, issue, config, facts, now, load, at_queue_head).run()
 
 
 class _Poll:
@@ -94,7 +98,9 @@ class _Poll:
         facts: FactsProvider,
         now: int,
         load: Mapping[str, int] | None,
+        at_queue_head: bool,
     ) -> None:
+        self.at_queue_head = at_queue_head
         self.github = github
         self.mirror = mirror
         self.issue = issue
@@ -142,6 +148,8 @@ class _Poll:
             return self._finish()
         self._intake()
         self._create_branch()  # intake may have moved the issue into spec
+        self._evidence()
+        self._integrate()
         self._runs()
         return self._finish()
 
@@ -265,6 +273,28 @@ class _Poll:
             else:
                 self.rejected.append(f"comment {command.comment_id}: {verdict.reason}")
         return valid
+
+    def _evidence(self) -> None:
+        """Record finished CI results for the current head (needs a gate policy)."""
+        policy, state = self.config.gate_policy, self.state
+        if policy is None or state.head_sha is None or is_terminal(state.status):
+            return
+        runs = self.github.list_check_runs(state.head_sha)
+        planned = plan_ci_evidence(
+            state.head_sha, runs, state.evidence, policy.dod_items, policy.policy_rev
+        )
+        if planned:
+            self._post(planned)
+
+    def _integrate(self) -> None:
+        policy = self.config.gate_policy
+        if policy is None:
+            return
+        is_revert = self.state.issue_type is IssueType.REVERT
+        policy = replace(policy, issue_type=self.state.issue_type, require_reviews=not is_revert)
+        planned = plan_integration(self.state, policy, self.at_queue_head)
+        if planned:
+            self._post(planned)
 
     def _runs(self) -> None:
         """Expire lapsed leases, then assign runs to open slots."""
