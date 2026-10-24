@@ -40,7 +40,11 @@ def test_the_pr_is_marked_ready_when_review_starts() -> None:
     state = replace(BRANCHED, status=Status.IN_REVIEW, pr_number=7)
     effect = plan_effect(state, 4, "staging")
     assert effect is not None
-    assert (effect.key, effect.action, dict(effect.data)) == ("ready", "mark_ready", {"number": 7})
+    assert (effect.key, effect.action, dict(effect.data)) == (
+        "ready:0",
+        "mark_ready",
+        {"number": 7},
+    )
 
 
 def test_a_ready_pr_needs_nothing_more() -> None:
@@ -50,11 +54,6 @@ def test_a_ready_pr_needs_nothing_more() -> None:
 
 def test_the_pr_is_not_marked_ready_while_implementing() -> None:
     state = replace(BRANCHED, status=Status.IMPLEMENTING, pr_number=7)
-    assert plan_effect(state, 4, "staging") is None
-
-
-def test_an_issue_that_returns_to_implementing_keeps_its_ready_pr() -> None:
-    state = replace(BRANCHED, status=Status.IMPLEMENTING, pr_number=7, pr_ready=True)
     assert plan_effect(state, 4, "staging") is None
 
 
@@ -285,3 +284,39 @@ def test_a_duplicate_is_closed_on_github_once() -> None:
     assert list(effect.data["decisions"]) == ["same as #3"]
     done = replace(state, closed_posted=frozenset({"close_duplicate"}))
     assert plan_effect(done, 4, "staging") is None
+
+
+# --- draft discipline ---------------------------------------------------------------------------------
+
+
+def test_a_ready_pr_goes_back_to_draft_when_the_issue_returns_to_rework() -> None:
+    for status in (Status.IMPLEMENTING, Status.SPEC, Status.SPEC_APPROVAL):
+        state = replace(BRANCHED, status=status, pr_number=7, pr_ready=True)
+        effect = plan_effect(state, 4, "staging")
+        assert effect is not None
+        assert (effect.key, effect.action, dict(effect.data)) == (
+            "draft:0",
+            "mark_draft",
+            {"number": 7},
+        )
+
+
+def test_a_draft_pr_in_rework_needs_nothing() -> None:
+    state = replace(BRANCHED, status=Status.IMPLEMENTING, pr_number=7, pr_ready=False)
+    assert plan_effect(state, 4, "staging") is None
+
+
+def test_each_toggle_has_its_own_key() -> None:
+    again = replace(BRANCHED, status=Status.IN_REVIEW, pr_number=7, ready_toggles=2)
+    effect = plan_effect(again, 4, "staging")
+    assert effect is not None and effect.key == "ready:2"
+    back = replace(again, status=Status.IMPLEMENTING, pr_ready=True, ready_toggles=3)
+    effect = plan_effect(back, 4, "staging")
+    assert effect is not None and effect.key == "draft:3"
+
+
+def test_a_blocked_or_waiting_issue_keeps_its_pr_as_it_is() -> None:
+    for status in (Status.BLOCKED, Status.NEEDS_INPUT, Status.HUMAN_UAT):
+        state = replace(BRANCHED, status=status, pr_number=7, pr_ready=True)
+        effect = plan_effect(state, 4, "staging")
+        assert effect is None or effect.action != "mark_draft"

@@ -628,3 +628,17 @@ def test_an_orphan_branch_is_a_parentless_commit_and_a_ref() -> None:
     commit = api.requests[1][2]
     assert commit["parents"] == [] and commit["tree"] == "T1"
     assert api.requests[2][2] == {"ref": "refs/heads/concert-events", "sha": SHA2}
+
+
+def test_converting_a_pr_back_to_draft_uses_graphql() -> None:
+    api = Api()
+    seen: list[Any] = []
+    api.on("GET", "/repos/acme/app/pulls/5", (200, pr_json(draft=True)))
+
+    def graphql(_m: re.Match[str], _q: dict[str, str], body: Any) -> tuple[int, Any]:
+        seen.append(body)
+        return 200, {"data": {"convertPullRequestToDraft": {"pullRequest": {"id": "PR_1"}}}}
+
+    api.on("POST", "/graphql", graphql)
+    assert client(api).mark_draft(5).draft is True
+    assert seen[0]["variables"] == {"p": "PR_1"} and "convertPullRequestToDraft" in seen[0]["query"]

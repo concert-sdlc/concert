@@ -89,6 +89,7 @@ class IssueState:
     kits_posted: frozenset[str] = frozenset()  # keys of the gate kits already posted
     pr_number: int | None = None
     pr_ready: bool = False
+    ready_toggles: int = 0  # how many times the PR went ready or back to draft
     revert_pr: int | None = None  # the auto-revert PR
     revert_branch: str | None = None
     revert_head: str | None = None  # its head commit
@@ -170,6 +171,7 @@ def _relanded(state: IssueState) -> IssueState:
         head_sha=None,
         pr_number=None,
         pr_ready=False,
+        ready_toggles=0,
         merge_sha=None,
         revert_pr=None,
         revert_branch=None,
@@ -374,7 +376,9 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         if action == "post_kit":
             return replace(state, kits_posted=state.kits_posted | {key})
         if action == "mark_ready":
-            return replace(state, pr_ready=True)
+            return replace(state, pr_ready=True, ready_toggles=state.ready_toggles + 1)
+        if action == "mark_draft":
+            return replace(state, pr_ready=False, ready_toggles=state.ready_toggles + 1)
         if action == "revert_pr":
             return replace(
                 state,

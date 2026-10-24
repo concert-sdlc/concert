@@ -390,6 +390,14 @@ class RestGitHub:
         )
         return self.get_pr(number)
 
+    def mark_draft(self, number: int) -> PullRequest:
+        node = self.http.json("GET", self._repo(f"/pulls/{number}"))["node_id"]
+        self.http.graphql(
+            "mutation($p:ID!){convertPullRequestToDraft(input:{pullRequestId:$p}){pullRequest{id}}}",
+            {"p": node},
+        )
+        return self.get_pr(number)
+
     def merge_pr(self, number: int, expected_head: str) -> str:
         try:
             raw = self.http.json(

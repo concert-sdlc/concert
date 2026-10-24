@@ -17,6 +17,8 @@ from concert.core.transitions import IssueType, Status, is_terminal
 _NO_PR_YET = frozenset(
     {Status.INBOX, Status.TRIAGE, Status.SPEC, Status.NEEDS_INPUT, Status.BLOCKED}
 )
+# Back in these states the PR returns to draft, so rework pushes start no CI and no review bots.
+_REWORK_STATES = frozenset({Status.SPEC, Status.SPEC_APPROVAL, Status.IMPLEMENTING})
 # From review on, the PR is out of draft.
 _READY_STATES = frozenset(
     {
@@ -70,7 +72,11 @@ def plan_effect(
         }
         return Effect("open_pr", "open_pr", data, resumed=False)
     if state.pr_number is not None and not state.pr_ready and state.status in _READY_STATES:
-        return Effect("ready", "mark_ready", {"number": state.pr_number}, resumed=False)
+        key = f"ready:{state.ready_toggles}"
+        return Effect(key, "mark_ready", {"number": state.pr_number}, resumed=False)
+    if state.pr_number is not None and state.pr_ready and state.status in _REWORK_STATES:
+        key = f"draft:{state.ready_toggles}"
+        return Effect(key, "mark_draft", {"number": state.pr_number}, resumed=False)
     if state.status is Status.NEEDS_INPUT:
         key = f"question:{len(state.answers)}"
         if key in state.questions_posted:

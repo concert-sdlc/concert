@@ -282,3 +282,11 @@ def test_an_orphan_branch_has_no_parent_and_cannot_be_created_twice(fake: FakeGi
     assert gh.commit_parents(sha) == () and gh.read_tree(sha) == {"README": "x"}
     with pytest.raises(Conflict):
         gh.create_orphan_branch("concert-events", {}, "again", "pm")
+
+
+def test_a_ready_pr_can_go_back_to_draft(fake: FakeGitHub) -> None:
+    number, _head = make_pr(fake)
+    gh = fake.client(PM)
+    gh.mark_ready(number)
+    assert not gh.get_pr(number).draft
+    assert gh.mark_draft(number).draft and gh.get_pr(number).draft

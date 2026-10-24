@@ -384,9 +384,14 @@ def test_an_outcome_resolves_its_intent_and_records_the_pr() -> None:
 def test_a_mark_ready_outcome_records_that_the_pr_is_ready() -> None:
     journey = Journey().add("created", {"issue_type": "code"})
     journey.add("outcome", {"key": "open_pr", "result": {"number": 7}})
-    journey.add("intent", {"key": "ready", "action": "mark_ready", "number": 7})
-    journey.add("outcome", {"key": "ready", "result": {"number": 7}})
-    assert derive(journey.raw()).pr_ready is True
+    journey.add("intent", {"key": "ready:0", "action": "mark_ready", "number": 7})
+    journey.add("outcome", {"key": "ready:0", "result": {"number": 7}})
+    state = derive(journey.raw())
+    assert state.pr_ready is True and state.ready_toggles == 1
+    journey.add("intent", {"key": "draft:1", "action": "mark_draft", "number": 7})
+    journey.add("outcome", {"key": "draft:1", "result": {"number": 7}})
+    state = derive(journey.raw())
+    assert state.pr_ready is False and state.ready_toggles == 2
 
 
 def test_an_outcome_for_an_unknown_intent_is_still_applied() -> None:

@@ -579,6 +579,10 @@ class _Poll:
             number = int(data["number"])
             self.github.mark_ready(number)
             return {"number": number}
+        if effect.action == "mark_draft":
+            number = int(data["number"])
+            self.github.mark_draft(number)
+            return {"number": number}
         if effect.action == "merge":
             return self._merge(int(data["number"]), str(data["expected_head"]))
         if effect.action == "close_issue":

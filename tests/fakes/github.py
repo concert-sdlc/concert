@@ -292,6 +292,11 @@ class FakeClient:
     def get_pr(self, number: int) -> PullRequest:
         return self._pr(number).pr
 
+    def mark_draft(self, number: int) -> PullRequest:
+        record = self._pr(number)
+        record.pr = replace(record.pr, draft=True)
+        return record.pr
+
     def revert_pr(self, number: int) -> PullRequest:
         record = self._pr(number)
         if record.pr.state != "merged" or record.merged_sha is None:

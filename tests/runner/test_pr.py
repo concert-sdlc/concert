@@ -132,3 +132,49 @@ def test_an_intent_with_an_unknown_action_blocks_the_issue() -> None:
     result = world.poll(issue)
     assert result.status is Status.BLOCKED
     assert "frobnicate" in (world.state(issue).note or "")
+
+
+def test_the_pr_goes_back_to_draft_when_the_issue_returns_to_rework_and_ready_again_after() -> None:
+    world = World()
+    issue = world.new_issue()
+    _sha, spec_hash = to_implementing(world, issue)
+    run = world.assign(issue, head=world.pm.get_ref(f"pm/{issue}"))
+    head = world.wip_commit(issue, run, {"backend/export.py": "v1"})
+    world.handoff(
+        issue,
+        run,
+        "implementing",
+        "done",
+        commit_sha=head,
+        artifact_rev=spec_hash,
+        run_commits=[head],
+    )
+    world.poll(issue)
+    assert prs(world)[0].draft is False
+    for reviewer in ("code", "security"):
+        run = world.assign(issue, head=head, reviewer=reviewer)
+        exit_name = "changes_needed" if reviewer == "code" else "clean"
+        world.handoff(
+            issue,
+            run,
+            "in_review",
+            exit_name,
+            reviewer=reviewer,
+            commit_sha=head,
+            artifact_rev=spec_hash,
+        )
+    assert world.poll(issue).status is Status.IMPLEMENTING
+    assert prs(world)[0].draft is True and world.state(issue).pr_ready is False
+    run = world.assign(issue, head=head)
+    head2 = world.wip_commit(issue, run, {"backend/export.py": "v2"})
+    world.handoff(
+        issue,
+        run,
+        "implementing",
+        "done",
+        commit_sha=head2,
+        artifact_rev=spec_hash,
+        run_commits=[head2],
+    )
+    assert world.poll(issue).status is Status.IN_REVIEW
+    assert prs(world)[0].draft is False and world.state(issue).ready_toggles == 3
