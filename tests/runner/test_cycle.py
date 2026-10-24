@@ -140,3 +140,74 @@ def test_a_hotfix_jumps_the_queue() -> None:
     result = cycle(world, normal, urgent)
     assert result.head == urgent  # dispatched later, but it jumps the queue
     assert world.state(normal).status is Status.HUMAN_UAT
+
+
+class BrokenFor:
+    """A GitHub client that fails to read one issue's comments."""
+
+    def __init__(self, inner: object, broken: int) -> None:
+        self._inner, self.broken = inner, broken
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+    def list_comments(self, issue: int, after_id: int = 0) -> object:
+        if issue == self.broken:
+            raise RuntimeError("GitHub exploded")
+        return self._inner.list_comments(issue, after_id)  # type: ignore[attr-defined]
+
+
+def test_a_failing_poll_of_the_issue_holding_the_queue_does_not_let_another_one_merge() -> None:
+    world, first, second, h1, _h2 = two_ready_issues()
+    cycle(world, first, second)  # the first issue takes the head
+    report_ready_to_merge(world, first, h1)
+    cycle(world, first, second)
+    assert world.state(first).status is Status.VERIFYING_STAGING
+    known = {first: world.state(first)}  # what the last cycle saw
+    broken = BrokenFor(world.pm, first)
+    world.fake.tick(1)
+    result = run_cycle(
+        broken,  # type: ignore[arg-type]
+        world.mirror,
+        [first, second],
+        world.config,
+        world.facts,
+        now=world.fake.now,
+        known=known,
+    )
+    assert first in result.errors and result.head is None
+    assert world.state(second).status is Status.HUMAN_UAT
+
+
+def test_an_issue_that_has_never_been_seen_and_fails_holds_the_queue_closed() -> None:
+    world, first, second, _h1, _h2 = two_ready_issues()
+    broken = BrokenFor(world.pm, first)
+    world.fake.tick(1)
+    result = run_cycle(
+        broken,  # type: ignore[arg-type]
+        world.mirror,
+        [first, second],
+        world.config,
+        world.facts,
+        now=world.fake.now,
+    )
+    assert first in result.errors and result.head is None  # unknown state: integrate nothing
+    assert world.state(second).status is Status.HUMAN_UAT
+
+
+def test_an_unrelated_failure_does_not_stop_a_healthy_queue() -> None:
+    world, first, second, _h1, _h2 = two_ready_issues()
+    third = world.new_issue()
+    known = {third: world.state(third)}
+    broken = BrokenFor(world.pm, third)
+    world.fake.tick(1)
+    result = run_cycle(
+        broken,  # type: ignore[arg-type]
+        world.mirror,
+        [first, second, third],
+        world.config,
+        world.facts,
+        now=world.fake.now,
+        known=known,
+    )
+    assert third in result.errors and result.head == first

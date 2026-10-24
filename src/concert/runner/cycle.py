@@ -53,8 +53,13 @@ def run_cycle(
         except Exception as error:  # noqa: BLE001  one issue's failure must not stop the others
             errors[n] = f"{type(error).__name__}: {error}"
     states = {n: r.state for n, r in results.items()}
-    busy = any(s.status in _HOLDING for s in states.values())
-    frozen = any(s.froze_queue and s.status is Status.BLOCKED for s in states.values())
+    # The queue decision fails closed: an issue whose poll failed is judged by the last state seen,
+    # and if none was ever seen it might be the one holding the queue, so nothing integrates.
+    gate_states = {**(known or {}), **states}
+    if any(n not in gate_states for n in errors):
+        return CycleResult(results, None, errors)
+    busy = any(s.status in _HOLDING for s in gate_states.values())
+    frozen = any(s.froze_queue and s.status is Status.BLOCKED for s in gate_states.values())
     waiting = [
         QueueEntry(n, states[n].issue_type, states[n].dispatched_at)
         for n in issues
