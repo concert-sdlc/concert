@@ -1,0 +1,37 @@
+src/concert/core/decide.py
+  s_4aba28ccdf2cb3::t_6507c21271cfef 114-115,288-294
+src/concert/core/derive.py
+  s_4aba28ccdf2cb3::t_c17d8611a203b5 84,246-247
+src/concert/github/api.py
+  s_4aba28ccdf2cb3::t_b3645d7d45041f 72
+src/concert/runner/poll.py
+  s_4aba28ccdf2cb3::t_94a4d4f70d1c08 19-26,30,40,160,162,291-293,310-312,314,326-327,330-359,373
+tests/core/test_decide.py
+  s_4aba28ccdf2cb3::t_038402507e1c4b 9-16,596-645
+tests/core/test_derive.py
+  s_4aba28ccdf2cb3::t_fb07e335be1ce7 404-420
+tests/core/test_effects.py
+  s_4aba28ccdf2cb3::t_7f9ccbaa8de0eb 90-133
+tests/fakes/github.py
+  s_4aba28ccdf2cb3::t_5fd1f1dd47a4c5 320
+tests/runner/test_merge.py
+  s_4aba28ccdf2cb3::t_7b1e80fd14348d 1-126
+src/concert/core/effects.py
+  s_4aba28ccdf2cb3::t_036be3ceb68420 40-43,59-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3189baa00d40dd1bd68b18515912f1e35cc248e3",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "unknown"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
