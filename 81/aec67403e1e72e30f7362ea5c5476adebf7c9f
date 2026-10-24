@@ -1,0 +1,29 @@
+src/concert/core/decide.py
+  s_4aba28ccdf2cb3::t_438dec129e9463 122-131,141,151-155,167-170
+src/concert/core/derive.py
+  s_4aba28ccdf2cb3::t_8cc2977582de15 33-35,49-51,115-116,126-132,134-136,138-140
+src/concert/core/spec_hash.py
+  s_4aba28ccdf2cb3::t_05831c3a16978c 1-23
+tests/core/test_decide.py
+  s_4aba28ccdf2cb3::t_979cbea66e412f 328-370
+tests/core/test_derive.py
+  s_4aba28ccdf2cb3::t_6d2ff6a6db9c30 191-239
+tests/core/test_spec_hash.py
+  s_4aba28ccdf2cb3::t_0039320adadec9 1-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "81aec67403e1e72e30f7362ea5c5476adebf7c9f",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
