@@ -29,7 +29,7 @@ def _compile(pattern: str) -> re.Pattern[str]:
         else:
             out.append(re.escape(pattern[i]))
             i += 1
-    return re.compile("".join(out) + r"\Z")
+    return re.compile("".join(out) + r"\Z", re.DOTALL)  # file names may contain newlines
 
 
 def matches_any(path: str, patterns: Collection[str]) -> bool:

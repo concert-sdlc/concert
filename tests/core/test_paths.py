@@ -24,6 +24,9 @@ CASES = [
     ("a?c", "abc", True),
     ("a?c", "a/c", False),
     ("a.b", "axb", False),
+    ("backend/**", "backend/odd\nname.py", True),
+    ("**/auth/**", "src/au\nth/../auth/x.py", True),
+    ("*.md", "new\nline.md", True),
 ]
 
 
