@@ -1,0 +1,25 @@
+src/concert/adopt/init.py
+  s_4aba28ccdf2cb3::t_19df21f40ecba4 1-63
+src/concert/adopt/plan.py
+  s_4aba28ccdf2cb3::t_d24f34351fdcf1 1-173
+tests/adopt/test_init.py
+  s_4aba28ccdf2cb3::t_7432c47ded1ecc 1-85
+tests/adopt/test_plan.py
+  s_4aba28ccdf2cb3::t_b7fb10444aebdb 1-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8136b1c84cb4a1f96dade3c2fded88bdb72a8770",
+  "prompts": {},
+  "sessions": {
+    "s_4aba28ccdf2cb3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "48251c77-9f6e-4f81-8587-db2eab83141a",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
