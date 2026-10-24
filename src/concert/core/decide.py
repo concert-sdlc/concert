@@ -226,6 +226,7 @@ def _accepted(item: AcceptedHandoff) -> Proposed:
             "commit_sha": handoff.commit_sha,
             "artifact_rev": handoff.artifact_rev,
             "doubts": list(handoff.doubts),
+            "decisions": list(handoff.decisions),
         },
     )
 

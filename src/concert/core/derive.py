@@ -93,6 +93,8 @@ class IssueState:
     revert_ci_passed: bool | None = None  # None until the checks on its head are decided
     revert_merge_sha: str | None = None  # the revert commit on the base branch, once merged
     asked_from: Status | None = None  # where a needs_input issue asked, and goes back to
+    decisions: tuple[str, ...] = ()  # the notable choices of the latest accepted run
+    closed_posted: frozenset[str] = frozenset()  # keys of issue closes already done
     doubts: tuple[str, ...] = ()  # the questions of the latest accepted run
     question_comment_id: int | None = None  # the PM's question comment, answers come after it
     questions_posted: frozenset[str] = frozenset()
@@ -276,6 +278,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             settled_reviewers=state.settled_reviewers
             | ({finished.reviewer} if finished is not None and finished.reviewer else set()),
         )
+        if "decisions" in data:
+            state = replace(state, decisions=tuple(str(d) for d in data["decisions"]))
         if "doubts" in data:
             state = replace(state, doubts=tuple(str(d) for d in data["doubts"]))
         if data.get("state") == "spec" and data.get("artifact_rev") is not None:
@@ -317,6 +321,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         )
         if action == "open_pr":
             return replace(state, pr_number=int(result["number"]))
+        if action == "close_issue":
+            return replace(state, closed_posted=state.closed_posted | {key})
         if action == "post_question":
             return replace(
                 state,

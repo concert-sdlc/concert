@@ -380,6 +380,7 @@ def test_an_accepted_handoff_event_carries_the_state_commit_and_artifact() -> No
         "commit_sha": "aaa1111",
         "artifact_rev": "spec1",
         "doubts": [],
+        "decisions": [],
     }
     state = log.apply(decide(log.state(), [committing], [])).state()
     assert state.spec_rev == "spec1" and state.head_sha == "aaa1111"

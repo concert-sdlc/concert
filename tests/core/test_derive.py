@@ -624,3 +624,24 @@ def test_reopening_voids_the_approvals_and_starts_a_new_generation() -> None:
     assert state.status is Status.INBOX and state.approved_spec_rev is None
     assert state.relands == 1 and state.branch_base is None and state.branch is None
     assert state.pr_number is None and state.evidence == () and state.head_sha is None
+
+
+def test_decisions_are_kept_and_a_close_outcome_is_remembered() -> None:
+    journey = Journey().add("created", {"issue_type": "code"}).move("inbox", "triage", "dispatch")
+    journey.add(
+        "handoff_accepted",
+        {
+            "run_id": "r-1",
+            "state": "triage",
+            "commit_sha": None,
+            "artifact_rev": None,
+            "doubts": [],
+            "decisions": ["same as #3"],
+        },
+    )
+    journey.move("triage", "closed_duplicate", "duplicate")
+    assert derive(journey.raw()).decisions == ("same as #3",)
+    journey.add("intent", {"key": "close_duplicate", "action": "close_issue"})
+    journey.add("outcome", {"key": "close_duplicate", "result": {"closed": True}})
+    state = derive(journey.raw())
+    assert state.closed_posted == frozenset({"close_duplicate"}) and state.pending_intents == ()

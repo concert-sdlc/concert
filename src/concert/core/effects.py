@@ -50,6 +50,11 @@ def plan_effect(
     if state.pending_intents:
         pending = state.pending_intents[0]
         return Effect(pending.key, pending.action, pending.data, resumed=True)
+    if state.status is Status.CLOSED_DUPLICATE:
+        if "close_duplicate" in state.closed_posted:
+            return None
+        data = {"decisions": list(state.decisions)}
+        return Effect("close_duplicate", "close_issue", data, resumed=False)
     if is_terminal(state.status):
         return None
     if (

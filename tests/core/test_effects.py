@@ -83,7 +83,7 @@ def test_the_pr_is_marked_ready_from_review_onwards(status: Status) -> None:
     assert effect is not None and effect.action == "mark_ready"
 
 
-@pytest.mark.parametrize("status", [Status.ON_STAGING, Status.CLOSED, Status.CLOSED_DUPLICATE])
+@pytest.mark.parametrize("status", [Status.ON_STAGING, Status.CLOSED])
 def test_a_finished_issue_needs_no_effects(status: Status) -> None:
     assert plan_effect(replace(BRANCHED, status=status), 4, "staging") is None
     assert plan_effect(replace(BRANCHED, status=status, pr_number=7), 4, "staging") is None
@@ -272,3 +272,16 @@ def test_each_new_ask_is_a_new_question() -> None:
 
 def test_no_question_is_posted_without_doubts_to_ask() -> None:
     assert plan_effect(replace(ASKING, doubts=()), 4, "staging") is not None  # asks generically
+
+
+# --- duplicates -------------------------------------------------------------------------------------
+
+
+def test_a_duplicate_is_closed_on_github_once() -> None:
+    state = replace(BRANCHED, status=Status.CLOSED_DUPLICATE, decisions=("same as #3",))
+    effect = plan_effect(state, 4, "staging")
+    assert effect is not None
+    assert (effect.key, effect.action) == ("close_duplicate", "close_issue")
+    assert list(effect.data["decisions"]) == ["same as #3"]
+    done = replace(state, closed_posted=frozenset({"close_duplicate"}))
+    assert plan_effect(done, 4, "staging") is None

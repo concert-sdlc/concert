@@ -175,6 +175,7 @@ class _Poll:
             self._post([Proposed("created", {"issue_type": "code"})])
         self._sync_closed()
         if is_terminal(self.state.status):
+            self._effects()  # a duplicate still has to be closed on GitHub
             return self._finish()
         self._create_branch()
         if self._check_branch():
@@ -438,6 +439,8 @@ class _Poll:
             return {"number": number}
         if effect.action == "merge":
             return self._merge(int(data["number"]), str(data["expected_head"]))
+        if effect.action == "close_issue":
+            return self._close_duplicate([str(d) for d in data["decisions"]])
         if effect.action == "post_question":
             return self._post_question(effect.key, [str(d) for d in data["doubts"]])
         if effect.action == "post_kit":
@@ -461,6 +464,20 @@ class _Poll:
             return {"sha": self.github.merge_pr(number, expected_head)}
         except Conflict as error:  # includes StaleHead
             return {"error": str(error)}
+
+    def _close_duplicate(self, decisions: list[str]) -> dict[str, int | str | None]:
+        """Explain, then close. Safe to repeat: a closed issue stays closed and the note is
+        posted only if the PM has not already posted it."""
+        said = " ".join(d.replace("\n", " ").replace("@", "@\u200b") for d in decisions)  # no pings
+        note = "Closed as a duplicate. " + said
+        text = note.strip()
+        if not any(
+            c.author.user_id == self.config.pm.user_id and c.body == text
+            for c in self.github.list_comments(self.issue)
+        ):
+            self.github.add_comment(self.issue, text)
+        self.github.close_issue(self.issue)
+        return {"closed": 1}
 
     def _post_question(self, key: str, doubts: list[str]) -> dict[str, int | str | None]:
         marker = question_marker(key)

@@ -135,3 +135,35 @@ def test_a_close_during_a_crashed_merge_waits_for_the_merge_to_be_resolved() -> 
     result = world.poll(issue)
     assert result.status is Status.VERIFYING_STAGING  # not closed over a merged change
     assert world.state(issue).merge_sha == world.pm.get_ref("staging")
+
+
+def test_a_duplicate_is_closed_on_github_with_a_pointer_to_the_original() -> None:
+    world = World()
+    original = world.new_issue()
+    issue = world.new_issue()
+    world.poll(issue)
+    world.say(ALICE, issue, "/dispatch")
+    world.poll(issue)
+    run = world.assign(issue, head=None)
+    world.handoff(issue, run, "triage", "duplicate", decisions=[f"same as #{original}"])
+    result = world.poll(issue)
+    assert result.status is Status.CLOSED_DUPLICATE
+    assert world.fake.issues[issue].state == "closed"
+    notes = [
+        c.body for c in world.pm.list_comments(issue) if c.body.startswith("Closed as a duplicate")
+    ]
+    assert len(notes) == 1 and f"#{original}" in notes[0]
+    assert world.poll(issue).posted == 0
+
+
+def test_an_agent_cannot_ping_people_through_the_duplicate_note() -> None:
+    world = World()
+    issue = world.new_issue()
+    world.poll(issue)
+    world.say(ALICE, issue, "/dispatch")
+    world.poll(issue)
+    run = world.assign(issue, head=None)
+    world.handoff(issue, run, "triage", "duplicate", decisions=["ask @alice\n/approve spec x"])
+    world.poll(issue)
+    [note] = [c.body for c in world.pm.list_comments(issue) if c.body.startswith("Closed as")]
+    assert "@alice" not in note and "\n" not in note
