@@ -1,0 +1,39 @@
+src/concert/github/api.py
+  s_f3f5335312522f::t_fbe1b0e6ff136e 10,36-51,132
+src/concert/github/git_facts.py
+  s_f3f5335312522f::t_ca59dca4b8b4e8 3-4,35-36
+src/concert/github/http.py
+  s_f3f5335312522f::t_83909fd533c611 21,77,83-84,115,122-127,130
+src/concert/github/rest.py
+  s_f3f5335312522f::t_402b5a93b51e61 13-14,22,36-37,82,98-113,163-164,166,202,278-288,306-315,342-345,356-364,425-431,450-480
+src/concert/github/transport.py
+  s_f3f5335312522f::t_5c9db90d4fd3f1 10-20,31
+src/concert/runner/poll.py
+  s_f3f5335312522f::t_0f7401ca8ceeb4 674
+tests/fakes/github.py
+  s_f3f5335312522f::t_8471d4a0ea54df 142,144-149,321,347-357
+tests/github/test_http.py
+  s_f3f5335312522f::t_a557ea64e02953 139,142-148
+tests/github/test_rest.py
+  s_f3f5335312522f::t_4eddbaf0a5b11e 42-46,56-58,60-61,382,389,464-465,467,480-532,671-672,674-689
+tests/github/test_review_fixes.py
+  s_f3f5335312522f::t_6d82c42241e3f4 1-269
+tests/runner/test_revert.py
+  s_f3f5335312522f::t_8f529879a20a23 26,137,139,145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5f132cf6a9588c4b76fd12301ebec258bff836ba",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
