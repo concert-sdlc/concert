@@ -29,7 +29,13 @@ def build_service(settings: Settings, transport: Transport, clock: Callable[[], 
     # the real identities (bot user ids) come from process.yaml on every tick
     unknown = Identity(user_id=0, login="unconfigured", is_bot=True)
     worker = Worker(
-        worker_github, settings.runner, unknown, unknown, agent, base_branch=settings.base_branch
+        worker_github,
+        settings.runner,
+        unknown,
+        unknown,
+        agent,
+        base_branch=settings.base_branch,
+        memory=_state_dir() / f"{settings.runner}-unpostable.json",
     )
     return Service(
         pm_github=pm_github,
@@ -60,3 +66,8 @@ def _read_key(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except OSError as error:
         raise SettingsError(f"cannot read the private key {path}: {error.strerror}") from error
+
+
+def _state_dir() -> Path:
+    """Where this runner remembers what must survive a restart (CONCERT_STATE_DIR, else ~/.concert)."""
+    return Path(os.environ.get("CONCERT_STATE_DIR") or Path.home() / ".concert")

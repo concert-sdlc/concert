@@ -7,11 +7,13 @@ advances that after accepting the handoff), and posts a `pm-handoff` block. The 
 behind a small protocol, so the real Claude Code adapter and the test doubles share one loop.
 """
 
+import json
 import threading
 import time
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol
 
 from concert.core.derive import ActiveRun, derive
@@ -88,11 +90,15 @@ class Worker:
         agent: Agent,
         heartbeat_every: float = 60.0,
         base_branch: str = "staging",
+        memory: Path | None = None,
     ) -> None:
         self.base_branch = base_branch
+        self.failures: list[str] = []  # why runs failed, for the operator; the service drains it
+        self._memory = memory
         self.github = github
         self.heartbeat_every = heartbeat_every
-        self._unpostable: set[str] = set()  # runs whose report GitHub refused: not paid for twice
+        # runs whose report GitHub refused: not paid for twice, even by a later process (`--once`)
+        self._unpostable: set[str] = self._remembered()
         self._paused: dict[str, int] = {}  # run_id -> when a usage limit lets it run again
         self._pauses: dict[str, int] = {}  # run_id -> how many times it was paused
         self._given_up: set[str] = set()  # paused past the budget: left to lapse, not run again
@@ -144,7 +150,8 @@ class Worker:
                 else:  # no more waiting: stop running it and stop beating for it, so the lease
                     self._given_up.add(run.run_id)  # lapses and the PM charges and reassigns
                 continue
-            except AgentFailure:
+            except AgentFailure as failure:
+                self.failures.append(f"#{issue}: {failure}")
                 continue
             done.append(run.run_id)
         return done
@@ -156,6 +163,21 @@ class Worker:
             return load_lessons(self.github.read_tree(self.base_branch))[0]
         except NotFound:
             return []
+
+    def _remembered(self) -> set[str]:
+        try:
+            return set(json.loads(self._memory.read_text())) if self._memory else set()
+        except (OSError, ValueError, TypeError):
+            return set()
+
+    def _remember(self) -> None:
+        if self._memory is None:
+            return
+        try:
+            self._memory.parent.mkdir(parents=True, exist_ok=True)
+            self._memory.write_text(json.dumps(sorted(self._unpostable)))
+        except OSError:
+            pass  # only costs a repeat run; the failure itself is already reported
 
     def beat(self, now: int, running: Sequence[str] = ()) -> None:
         """Report the runs this runner holds: the one being executed and any paused by a limit."""
@@ -241,6 +263,7 @@ class Worker:
             self.github.add_comment(issue, body)
         except GitHubError as error:
             self._unpostable.add(run.run_id)
+            self._remember()
             raise AgentFailure(f"the report was not accepted by GitHub: {error}") from error
 
     @contextmanager

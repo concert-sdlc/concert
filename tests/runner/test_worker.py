@@ -1,8 +1,11 @@
 """The worker executes the runs the PM assigned to it and posts handoffs (no real agent)."""
 
 from collections.abc import Mapping
+from pathlib import Path
+from typing import Any, cast
 
 from concert.core.transitions import Status
+from concert.github.api import Forbidden, GitHubApi
 from concert.github.comments import extract_handoffs
 from concert.runner.worker import AgentFailure, AgentResult, AgentTask, Worker
 from tests.runner.helpers import ALICE, PM, VM1, World, spec_files
@@ -228,3 +231,52 @@ def test_a_run_that_only_touches_workflows_pushes_nothing() -> None:
     handoff = handoffs(world, issue)[-1]
     assert handoff.commit_sha == branch_head and handoff.run_commits == ()
     assert world.pm.get_ref(f"pm-wip/vm-1/{issue}/{run}") is None
+
+
+# --- failures are visible, and a refused report is not paid for again --------------------------------
+
+
+class _RefusingComments:
+    """The worker's client with commenting refused, as a GitHub App without Issues: write is."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def add_comment(self, issue: int, body: str) -> Any:
+        raise Forbidden("Resource not accessible by integration")
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+def refusing_client(world: World) -> GitHubApi:
+    return cast(GitHubApi, _RefusingComments(world.fake.client(VM1)))
+
+
+def test_an_agent_failure_is_recorded_for_the_operator() -> None:
+    world = World()
+    issue, _run = dispatched_with_triage_run(world)
+
+    class Failing(Scripted):
+        def run(self, task: AgentTask) -> AgentResult:
+            raise AgentFailure("timed out")
+
+    w = worker(world, Failing())
+    w.run_once(issue, now=world.fake.now)
+    assert w.failures == [f"#{issue}: timed out"]
+
+
+def test_a_refused_report_is_not_paid_for_again_by_a_later_process(tmp_path: Path) -> None:
+    world = World()
+    issue, _run = dispatched_with_triage_run(world)
+    memory = tmp_path / "memory.json"
+    first = Scripted()
+    refusing = Worker(refusing_client(world), "vm-1", VM1, PM, first, memory=memory)
+    refusing.run_once(issue, now=world.fake.now)
+    assert len(first.tasks) == 1
+    assert any("not accepted by GitHub" in f for f in refusing.failures)
+    second = Scripted()  # a new process: a fresh Worker reading the same memory
+    Worker(refusing_client(world), "vm-1", VM1, PM, second, memory=memory).run_once(
+        issue, now=world.fake.now
+    )
+    assert second.tasks == []

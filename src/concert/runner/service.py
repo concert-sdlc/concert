@@ -91,6 +91,8 @@ class Service:
                 self.worker.run_once(issue, now)
             except Exception as error:  # noqa: BLE001  one issue's failure must not stop the others
                 self.errors.append(f"#{issue}: {error}")
+        self.errors.extend(self.worker.failures)
+        self.worker.failures.clear()
 
     def _digest(self, config: RunnerConfig, now: int) -> None:
         """Once a day, in Steering: the delivery metrics and what needs a person's attention."""
