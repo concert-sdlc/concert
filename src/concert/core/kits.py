@@ -53,6 +53,36 @@ def render_spec_kit(facts: KitFacts, spec_hash: str, summary: str) -> str:
     )
 
 
+def render_workflow_kit(
+    issue: int, parent: int | None, diffs: Sequence[tuple[str, str]], digest: str
+) -> str:
+    """The proposed workflow files as diffs against staging, and the one command that approves
+    exactly them. Agent-written YAML is shown fenced and escaped, never as markup."""
+    origin = f"the run of #{parent}" if parent is not None else "an agent run"
+    lines = [
+        f"## Workflow change for your approval: #{issue}",
+        "",
+        f"Requested by {origin}. Nothing is pushed until an admin approves this exact content.",
+        "",
+        "### Proposed changes",
+        "",
+    ]
+    for path, diff in diffs:
+        lines += [f"**{_code(path)}**", "", "```diff", _escape(diff).rstrip("\n"), "```", ""]
+    lines += [
+        "### Decide",
+        "",
+        "```",
+        f"/approve workflow {digest}",
+        "```",
+        "",
+        "Approving opens a pull request with these files. Merge it yourself: the PM never merges a workflow.",
+        "",
+        kit_marker("workflow", digest),
+    ]
+    return "\n".join(lines)
+
+
 def render_uat_kit(facts: KitFacts, head: str, evidence: Sequence[Evidence], summary: str) -> str:
     approvals = [f"/approve uat {head}"]
     if facts.security_sensitive:

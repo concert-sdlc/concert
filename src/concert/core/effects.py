@@ -74,6 +74,13 @@ def plan_effect(
             "title": f"Concert #{issue}",
         }
         return Effect("open_pr", "open_pr", data, resumed=False)
+    if state.issue_type is IssueType.WORKFLOW:
+        return _plan_workflow(state)
+    if state.workflow_requests:
+        run_id, digest = state.workflow_requests[0]
+        return Effect(
+            f"workflow:{run_id}", "file_workflow", {"run_id": run_id, "hash": digest}, resumed=False
+        )
     if state.pr_number is not None and not state.pr_ready and state.status in _READY_STATES:
         key = f"ready:{state.ready_toggles}"
         return Effect(key, "mark_ready", {"number": state.pr_number}, resumed=False)
@@ -102,6 +109,20 @@ def plan_effect(
         data = {"number": state.pr_number, "expected_head": state.head_sha}
         return Effect("merge", "merge", data, resumed=False)
     return _plan_revert(state) if auto_revert else None
+
+
+def _plan_workflow(state: IssueState) -> Effect | None:
+    """A workflow issue: show the admin the diff, and once its hash is approved, push it."""
+    if state.workflow_diff_hash is None:
+        return None
+    if state.status is Status.HUMAN_UAT:
+        key = f"kit:workflow:{state.workflow_diff_hash}"
+        if key in state.kits_posted:
+            return None
+        return Effect(key, "post_kit", {"kind": "workflow", "rev": state.workflow_diff_hash}, False)
+    if state.status is Status.INTEGRATING and state.pr_number is None:
+        return Effect("push_workflow", "push_workflow", {"hash": state.workflow_diff_hash}, False)
+    return None
 
 
 def _plan_rebase(

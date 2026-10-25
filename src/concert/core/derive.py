@@ -118,6 +118,11 @@ class IssueState:
     refresh_result: str | None = None  # "clean" or "conflict" until the issue has moved on
     refresh_note: str | None = None  # the conflicting paths
     pm_commits: tuple[str, ...] = ()  # commits the PM itself made on the issue branch (rebases)
+    workflow_requests: tuple[tuple[str, str], ...] = ()  # (run_id, hash) asked for, not yet filed
+    workflow_issues: tuple[int, ...] = ()  # the workflow issues this issue's runs led to
+    workflow_files: Mapping[str, str] | None = None  # a workflow issue: the approved contents
+    workflow_parent: int | None = None
+    workflow_diff_hash: str | None = None
     lessons_proposed: tuple[str, ...] = ()  # lessons suggested by humans and agents, newest last
     plan_deviations: int = 0  # deviations from the plan that reviewers reported
     revert_ci_reruns: int = 0  # times CI was run again on the revert PR after a failure
@@ -309,6 +314,15 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             state = replace(state, spec_rev=str(data["artifact_rev"]))
         if data.get("commit_sha") is not None:
             state = replace(state, head_sha=str(data["commit_sha"]))
+        request = data.get("workflow_request")
+        if request:
+            state = replace(
+                state,
+                workflow_requests=(
+                    *state.workflow_requests,
+                    (str(data["run_id"]), str(request["hash"])),
+                ),
+            )
         proposed = tuple(str(t) for t in data.get("lessons_proposed", ()))
         deviations = len(tuple(data.get("plan_deviations", ())))
         if proposed or deviations:
@@ -318,6 +332,17 @@ def _apply(state: IssueState, event: Event) -> IssueState:
                 plan_deviations=state.plan_deviations + deviations,
             )
         return state
+    if kind == "workflow_change":
+        if state.issue_type is not IssueType.WORKFLOW:
+            raise _Conflict(
+                f"conflict at seq {event.seq}: a workflow change on a {state.issue_type.value} issue"
+            )
+        return replace(
+            state,
+            workflow_files=dict(event.data["files"]),
+            workflow_parent=int(event.data["parent"]),
+            workflow_diff_hash=str(event.data["diff_hash"]),
+        )
     if kind == "lesson_proposed":
         return replace(
             state,
@@ -419,6 +444,24 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             )
         if action == "post_kit":
             return replace(state, kits_posted=state.kits_posted | {key})
+        if action == "file_workflow":
+            filed = str(pending.data.get("run_id")) if pending is not None else ""
+            return replace(
+                state,
+                workflow_requests=tuple(r for r in state.workflow_requests if r[0] != filed),
+                workflow_issues=(
+                    (*state.workflow_issues, int(result["issue"]))
+                    if int(result["issue"]) > 0  # 0: the request could not be filed
+                    else state.workflow_issues
+                ),
+            )
+        if action == "push_workflow":
+            return replace(
+                state,
+                pr_number=int(result["number"]),
+                pr_ready=True,
+                branch=str(result["head"]),
+            )
         if action == "dispatch_ci":
             return replace(state, dispatched=state.dispatched | {key})
         if action == "mark_ready":

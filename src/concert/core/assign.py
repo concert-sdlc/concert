@@ -109,6 +109,8 @@ def plan_assignments(
     status = state.status
     if _inactive(state) or status not in _AGENT_STATES:
         return []
+    if state.issue_type is IssueType.WORKFLOW:
+        return []  # no agent works on a workflow issue: an admin approves and merges it
     if status is Status.IMPLEMENTING and state.issue_type is IssueType.REVERT:
         return []  # a revert's implementing state is PM-only: no agent runs there
     attempts = state.infra_attempts.get(status.value, 0)

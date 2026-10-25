@@ -20,6 +20,7 @@ from concert.core.derive import IssueState
 from concert.core.evidence import GatePolicy, Ready, evaluate_gate
 from concert.core.handoff import Accepted, Handoff, consolidate_reviews
 from concert.core.transitions import IssueType, Status, Trigger, is_terminal, next_status
+from concert.core.workflow import diff_hash
 
 if TYPE_CHECKING:  # ci imports Proposed from here
     from concert.core.ci import CheckRun
@@ -92,6 +93,7 @@ _GATES: dict[tuple[Status, IssueType, str, str | None], Trigger] = {
     (Status.HUMAN_UAT, IssueType.CODE, "reject", "uat"): Trigger.REJECT_UAT,
     (Status.HUMAN_UAT, IssueType.HOTFIX, "reject", "uat"): Trigger.REJECT_UAT,
     (Status.HUMAN_UAT, IssueType.REVERT, "reject", "revert"): Trigger.REJECT_REVERT,
+    (Status.HUMAN_UAT, IssueType.WORKFLOW, "approve", "workflow"): Trigger.APPROVE_WORKFLOW,
 }
 
 # (status, verb, kind) -> approval evidence kept in the ledger; the move to integrating is
@@ -311,6 +313,11 @@ def _accepted(item: AcceptedHandoff) -> Proposed:
         data["lessons_proposed"] = [t[:_LESSON_TEXT] for t in handoff.lessons_proposed[:_LESSONS]]
     if handoff.plan_deviations:
         data["plan_deviations"] = list(handoff.plan_deviations[:_LESSONS])
+    if handoff.workflow_change_request:  # the contents stay in the handoff comment; this binds them
+        data["workflow_request"] = {
+            "hash": diff_hash(handoff.workflow_change_request),
+            "paths": sorted(handoff.workflow_change_request),
+        }
     return Proposed("handoff_accepted", data)
 
 
@@ -447,6 +454,8 @@ def plan_integration(state: IssueState, policy: GatePolicy, at_queue_head: bool)
     current head and the issue is first in the integration queue."""
     if state.status is not Status.HUMAN_UAT or state.blocked_reason is not None:
         return []
+    if state.issue_type is IssueType.WORKFLOW:
+        return []  # an admin merges its PR; it never takes the queue head
     if state.head_sha is None or not at_queue_head:
         return []
     if not isinstance(evaluate_gate(state.head_sha, state.evidence, policy), Ready):
@@ -471,6 +480,17 @@ def plan_refresh(state: IssueState) -> list[Proposed]:
         return _trigger_events(state, Trigger.REFRESH_ESCALATED, note)
     note = f"rebasing onto staging conflicts in: {paths}"
     return _trigger_events(state, Trigger.REFRESH_CONFLICT, note)
+
+
+def plan_workflow_merged(state: IssueState, pr_merged: bool) -> list[Proposed]:
+    """An admin merged the workflow PR: the issue is done. The PM never merges it."""
+    if (
+        state.issue_type is not IssueType.WORKFLOW
+        or state.status is not Status.INTEGRATING
+        or not pr_merged
+    ):
+        return []
+    return _trigger_events(state, Trigger.EXTERNAL_MERGE)
 
 
 def plan_merged(state: IssueState) -> list[Proposed]:

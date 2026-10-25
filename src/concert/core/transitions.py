@@ -55,6 +55,8 @@ class Trigger(Enum):
     APPROVE_REVERT = "approve_revert"
     REJECT_REVERT = "reject_revert"
     # the PM rebased the branch onto a moved staging head (pre-gate refresh, or at integrating)
+    APPROVE_WORKFLOW = "approve_workflow"
+    EXTERNAL_MERGE = "external_merge"  # an admin merged the workflow PR; the PM never does
     REFRESHED = "refreshed"
     REFRESH_CONFLICT = "refresh_conflict"  # the rebase conflicts: back to implementing, uncharged
     REFRESH_ESCALATED = "refresh_escalated"  # a second conflict: admins are asked
@@ -64,6 +66,7 @@ class IssueType(Enum):
     CODE = "code"
     HOTFIX = "hotfix"  # full lifecycle; /dispatch hotfix (admin); never auto-reverted
     REVERT = "revert"  # created by /pm revert; no agent runs
+    WORKFLOW = "workflow"  # a PM-filed request to change CI workflows; an admin merges the PR
     DOCS = "docs"  # documentation only: no automated UAT; reclassified to code if the diff is not
 
 
@@ -172,11 +175,22 @@ _DOCS_TABLE: dict[tuple[Status, Trigger], Status] = {
     (_S.IN_REVIEW, _T.CLEAN): _S.HUMAN_UAT,
 }
 
+# A workflow issue has no agent and never takes the integration queue: an admin approves the
+# diff, the PM pushes it as a PR, and the admin's own merge ends the issue.
+_WORKFLOW_TABLE: dict[tuple[Status, Trigger], Status] = {
+    (_S.HUMAN_UAT, _T.APPROVE_WORKFLOW): _S.INTEGRATING,
+    (_S.INTEGRATING, _T.EXTERNAL_MERGE): _S.ON_STAGING,
+    (_S.HUMAN_UAT, _T.CHECK_FAILED): _S.BLOCKED,
+    (_S.INTEGRATING, _T.CHECK_FAILED): _S.BLOCKED,
+    **_CLOSE_ROWS,
+}
+
 _TABLES: dict[IssueType, dict[tuple[Status, Trigger], Status]] = {
     IssueType.CODE: _CODE_TABLE,
     IssueType.HOTFIX: _HOTFIX_TABLE,
     IssueType.REVERT: _REVERT_TABLE,
     IssueType.DOCS: _DOCS_TABLE,
+    IssueType.WORKFLOW: _WORKFLOW_TABLE,
 }
 
 
@@ -191,8 +205,11 @@ def revert_ci_action(failures: int) -> RevertCiAction:
 
 
 def initial_status(issue_type: IssueType) -> Status:
-    """Where a new issue of this type starts: reverts start in the PM-only `implementing`."""
-    return Status.IMPLEMENTING if issue_type is IssueType.REVERT else Status.INBOX
+    """Where a new issue of this type starts: reverts start in the PM-only `implementing`, and a
+    workflow issue is born at the human gate (the PM files it with the diff already attached)."""
+    if issue_type is IssueType.REVERT:
+        return Status.IMPLEMENTING
+    return Status.HUMAN_UAT if issue_type is IssueType.WORKFLOW else Status.INBOX
 
 
 class InvalidTransition(Exception):

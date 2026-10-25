@@ -182,9 +182,12 @@ def test_adopt_revert_and_workflow_approvals_are_admin_only_and_bound() -> None:
     assert isinstance(check(f"/approve adopt {REPORT_HASH}", ADMIN, ctx(Status.INBOX)), Valid)
     assert isinstance(check(f"/approve adopt {REPORT_HASH}", APPROVER, ctx(Status.INBOX)), Rejected)
     assert isinstance(check("/approve adopt 1111111", ADMIN, ctx(Status.INBOX)), Rejected)
-    assert isinstance(check(f"/approve workflow {DIFF_HASH}", ADMIN, ctx(Status.HUMAN_UAT)), Valid)
+    workflow = ctx(Status.HUMAN_UAT, IssueType.WORKFLOW)
+    assert isinstance(check(f"/approve workflow {DIFF_HASH}", ADMIN, workflow), Valid)
+    assert isinstance(check(f"/approve workflow {DIFF_HASH}", APPROVER, workflow), Rejected)
+    # only a workflow issue has a workflow diff to approve
     assert isinstance(
-        check(f"/approve workflow {DIFF_HASH}", APPROVER, ctx(Status.HUMAN_UAT)), Rejected
+        check(f"/approve workflow {DIFF_HASH}", ADMIN, ctx(Status.HUMAN_UAT)), Rejected
     )
 
 

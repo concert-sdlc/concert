@@ -168,7 +168,7 @@ class _Rule:
 
 
 _ALL_TYPES = frozenset(IssueType)
-_NOT_REVERT = _ALL_TYPES - {IssueType.REVERT}
+_NOT_REVERT = _ALL_TYPES - {IssueType.REVERT, IssueType.WORKFLOW}
 _S = Status
 
 
@@ -207,6 +207,7 @@ def _rule(command: Command) -> _Rule | None:
                 Role.ADMIN,
                 _prefix_binding("workflow_diff_hash", "workflow diff hash"),
                 frozenset({_S.HUMAN_UAT}),
+                frozenset({IssueType.WORKFLOW}),
             )
     if verb == "reject":
         if kind == "spec":

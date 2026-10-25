@@ -224,7 +224,7 @@ class Digest:
 def compute(observations: Sequence[Observation], now: int) -> Digest:
     this_week = week_start(now)
     weeks = (this_week, this_week - WEEK)
-    real = [o for o in observations if o.issue_type != "revert"]
+    real = [o for o in observations if o.issue_type not in ("revert", "workflow")]
     return Digest(
         now=now,
         weeks=tuple(_week(real, start, now) for start in weeks),

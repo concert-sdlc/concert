@@ -36,6 +36,7 @@ from concert.core.decide import (
     plan_refresh,
     plan_revert_ci,
     plan_verify_failure,
+    plan_workflow_merged,
 )
 from concert.core.dependencies import (
     START,
@@ -65,10 +66,12 @@ from concert.core.kits import (
     render_question,
     render_spec_kit,
     render_uat_kit,
+    render_workflow_kit,
 )
 from concert.core.metrics import Timed
 from concert.core.paths import WORKFLOW_PATHS, changed_paths, matches_any
 from concert.core.transitions import IssueType, Status, Trigger, is_terminal
+from concert.core.workflow import diff_hash, problem_with, render_diff
 from concert.github.api import Comment, Conflict, GitHubApi, Identity, NotFound
 from concert.github.comments import (
     EventRecord,
@@ -232,6 +235,7 @@ class _Poll:
         self._revert_ci()
         self._effects()
         self._refresh()
+        self._workflow_merged()
         if not self.held and not self._unmet_for_integration():
             self._integrate()
             # reaching the head of the queue may call for a rebase; do it before a run is assigned
@@ -489,7 +493,7 @@ class _Poll:
             spec_hash=state.spec_rev,
             head_sha=state.head_sha,
             adoption_report_hash=None,
-            workflow_diff_hash=None,
+            workflow_diff_hash=state.workflow_diff_hash,
             unblock_targets=unblock_targets(state),
             existing_issues=self._existing_issues(comments),
         )
@@ -498,7 +502,17 @@ class _Poll:
             if command.comment_id in state.consumed_commands:
                 continue
             verdict = validate_command(command.command, command.actor, command.facts, context)
-            if isinstance(verdict, Valid) and (reason := self._dependency_refusal(command.command)):
+            if (
+                isinstance(verdict, Valid)
+                and command.command.verb == "approve"
+                and command.command.kind == "workflow"
+                and (waiting := self._unmet_for_integration())
+            ):  # approved only once everything it depends on has landed; asked again later
+                waits = ", ".join(f"#{n}" for n in waiting)
+                self.ignored.append(f"comment {command.comment_id}: waiting on {waits}")
+            elif isinstance(verdict, Valid) and (
+                reason := self._dependency_refusal(command.command)
+            ):
                 self.rejected.append(f"comment {command.comment_id}: {reason}")
             elif isinstance(verdict, Valid):
                 valid.append(
@@ -612,6 +626,10 @@ class _Poll:
                 str(data["head"]), str(data["base"]), str(data["title"])
             )
             return {"number": pr.number}
+        if effect.action == "file_workflow":
+            return self._file_workflow(str(data["run_id"]), str(data["hash"]))
+        if effect.action == "push_workflow":
+            return self._push_workflow()
         if effect.action == "dispatch_ci":
             self.github.dispatch_ci(str(data["ref"]))
             return {"ref": str(data["ref"])}
@@ -685,6 +703,16 @@ class _Poll:
             ):
                 return {"comment_id": comment.id}
         state = self.state
+        if kind == "workflow":
+            diffs = [
+                (
+                    path,
+                    render_diff(path, self.github.read_file(self.config.base_branch, path), text),
+                )
+                for path, text in sorted((state.workflow_files or {}).items())
+            ]
+            body = render_workflow_kit(self.issue, state.workflow_parent, diffs, revision)
+            return {"comment_id": self.github.add_comment(self.issue, body).id}
         ref = state.head_sha or self.branch
         facts = self._kit_facts()
         if kind == "spec":
@@ -739,6 +767,81 @@ class _Poll:
             # automated UAT never ran for it: an admin decides where it goes next
             return self._block(f"reclassified to a code issue after review: {shown}")
         return False
+
+    def _file_workflow(self, run_id: str, digest: str) -> dict[str, int | str | None]:
+        """Turn an accepted run's workflow change request into a `workflow` issue holding exactly
+        those files. Looks for the issue first, so a crash does not file it twice."""
+        item = next((i for i in self.handoff_items if i.handoff.run_id == run_id), None)
+        files = dict(item.handoff.workflow_change_request) if item is not None else {}
+        problem = "the request is no longer in its handoff" if not files else problem_with(files)
+        if problem is None and diff_hash(files) != digest:
+            problem = "the request changed after it was accepted"
+        if problem is not None:
+            self.invalid.append(f"workflow change request of {run_id}: {problem}")
+            return {"issue": 0}
+        title = f"Workflow change from #{self.issue} ({run_id})"
+        number = next(
+            (n for n in self.github.list_open_issues() if self.github.get_issue(n).title == title),
+            None,
+        )
+        if number is None:
+            body = (
+                f"Filed by Concert for a workflow change that a run of #{self.issue} asked for. "
+                "Review the proposed files in the kit below."
+            )
+            number = self.github.create_issue(title, body).number
+        if not self.mirror.read(number):
+            created = append_event(
+                [], epoch=self.config.epoch, kind="created", data={"issue_type": "workflow"}
+            )
+            change = append_event(
+                [created],
+                epoch=self.config.epoch,
+                kind="workflow_change",
+                data={"parent": self.issue, "files": files, "diff_hash": digest},
+            )
+            publish_events(self.github, self.mirror, number, [created, change])
+        marker = f"<!-- pm-workflow:{run_id} -->"
+        note = f"A run asked for a change to the CI workflows. Filed #{number} for an admin to decide.\n\n{marker}"
+        if not any(
+            c.author.user_id == self.config.pm.user_id and has_marker(c.body, marker)
+            for c in self.github.list_comments(self.issue)
+        ):
+            self.github.add_comment(self.issue, note)
+        return {"issue": number}
+
+    def _push_workflow(self) -> dict[str, int | str | None]:
+        """Push the approved files on a branch and open the pull request. Only the PM App has the
+        permission to write workflow files; the admin merges the result."""
+        state, github = self.state, self.github
+        files = state.workflow_files or {}
+        if not files or diff_hash(files) != state.workflow_diff_hash:
+            return {"error": "the approved files do not match their hash"}
+        branch = f"pm/{self.issue}-workflow"
+        base = self.config.base_branch
+        if github.get_ref(branch) is None:
+            github.create_branch(branch, base)
+        if any(github.read_file(branch, path) != text for path, text in files.items()):
+            github.commit(
+                branch,
+                f"Workflow change for #{state.workflow_parent} (approved in #{self.issue})",
+                dict(files),
+                author=self.config.pm.login,
+                committer=self.config.pm.login,
+            )
+        pr = github.find_pr(branch) or github.create_pr(
+            branch, base, f"Workflow change (#{self.issue})"
+        )
+        github.mark_ready(pr.number)
+        return {"number": pr.number, "head": branch}
+
+    def _workflow_merged(self) -> None:
+        state = self.state
+        if state.issue_type is not IssueType.WORKFLOW or state.pr_number is None:
+            return
+        planned = plan_workflow_merged(state, self.github.get_pr(state.pr_number).state == "merged")
+        if planned:
+            self._post(planned)
 
     def _staging_moved(self) -> bool:
         """Does the base branch have commits the issue's branch lacks?"""
@@ -1021,6 +1124,7 @@ class _Poll:
             status_reverted=self.card_was_reverted,
             state=state,
             ready_for_integration=state.status is Status.HUMAN_UAT
+            and state.issue_type is not IssueType.WORKFLOW
             and state.blocked_reason is None
             and not self.held
             and not self._unmet_for_integration()
