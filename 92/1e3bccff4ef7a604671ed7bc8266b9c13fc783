@@ -1,0 +1,33 @@
+docs/STATUS.md
+  s_f3f5335312522f::t_5fc4b21a53133e 55-72
+src/concert/agents/claude_code.py
+  s_f3f5335312522f::t_43f44de9a14caa 28-34,38,61-63
+src/concert/cli/__init__.py
+  s_f3f5335312522f::t_c9907b855324eb 46-49
+src/concert/cli/settings.py
+  s_f3f5335312522f::t_daf0c2c0ac3564 19-26,48-54,100-104,110,130-133,135-147
+src/concert/cli/wiring.py
+  s_f3f5335312522f::t_e99f0651b97fc4 27
+tests/agents/test_claude_code.py
+  s_f3f5335312522f::t_38e016eed8c690 205-215
+tests/cli/test_main.py
+  s_f3f5335312522f::t_51b3049b4cc3bf 62-65,212-221
+tests/cli/test_settings.py
+  s_f3f5335312522f::t_fdc32bd513efa8 85-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "921e3bccff4ef7a604671ed7bc8266b9c13fc783",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
