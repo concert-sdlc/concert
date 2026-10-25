@@ -116,6 +116,9 @@ class IssueState:
     refresh_result: str | None = None  # "clean" or "conflict" until the issue has moved on
     refresh_note: str | None = None  # the conflicting paths
     pm_commits: tuple[str, ...] = ()  # commits the PM itself made on the issue branch (rebases)
+    revert_ci_reruns: int = 0  # times CI was run again on the revert PR after a failure
+    revert_ci_rerun_at: int | None = None  # when, so the failed run is not read as the new one
+    dispatched: frozenset[str] = frozenset()  # keys of the CI dispatches already made
 
 
 class _Conflict(Exception):
@@ -184,6 +187,8 @@ def _relanded(state: IssueState) -> IssueState:
         revert_branch=None,
         revert_head=None,
         revert_ci_passed=None,
+        revert_ci_reruns=0,
+        revert_ci_rerun_at=None,
         revert_merge_sha=None,
         evidence=(),
     )
@@ -349,6 +354,12 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         )
     if kind == "revert_ci":
         return replace(state, revert_ci_passed=bool(event.data["passed"]))
+    if kind == "revert_ci_rerun":
+        return replace(
+            state,
+            revert_ci_reruns=state.revert_ci_reruns + 1,
+            revert_ci_rerun_at=int(event.data["at"]),
+        )
     if kind == "verify_failed":
         return replace(state, verify_failed=True)
     if kind == "intent":
@@ -382,6 +393,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             )
         if action == "post_kit":
             return replace(state, kits_posted=state.kits_posted | {key})
+        if action == "dispatch_ci":
+            return replace(state, dispatched=state.dispatched | {key})
         if action == "mark_ready":
             return replace(state, pr_ready=True, ready_toggles=state.ready_toggles + 1)
         if action == "mark_draft":

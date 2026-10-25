@@ -605,6 +605,9 @@ class _Poll:
                 str(data["head"]), str(data["base"]), str(data["title"])
             )
             return {"number": pr.number}
+        if effect.action == "dispatch_ci":
+            self.github.dispatch_ci(str(data["ref"]))
+            return {"ref": str(data["ref"])}
         if effect.action == "rebase":
             return self._rebase(str(data["branch"]), str(data["head"]), str(data["stage"]))
         if effect.action == "mark_ready":
@@ -809,7 +812,7 @@ class _Poll:
         if policy is None or state.revert_head is None:
             return
         runs = self.github.list_check_runs(state.revert_head)
-        planned = plan_revert_ci(state, runs, policy.dod_items)
+        planned = plan_revert_ci(state, runs, policy.dod_items, self.now)
         if planned:
             self._post(planned)
 

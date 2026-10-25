@@ -467,11 +467,16 @@ def plan_merged(state: IssueState) -> list[Proposed]:
     return _trigger_events(state, Trigger.READY_TO_MERGE)
 
 
+REVERT_CI_RERUNS = 1  # CI is run again once on a failing revert PR before the queue is frozen
+RERUN_GRACE = 120  # seconds the old failed run may still be listed after a re-dispatch
+
+
 def plan_revert_ci(
-    state: IssueState, runs: "Sequence[CheckRun]", dod_items: Collection[str]
+    state: IssueState, runs: "Sequence[CheckRun]", dod_items: Collection[str], now: int = 0
 ) -> list[Proposed]:
     """Decide whether the auto-revert PR's checks are green: every definition-of-done check
-    finished on the revert head, all successful (clear to merge) or any failed (freeze)."""
+    finished on the revert head, all successful (clear to merge) or any failed. A first failure
+    runs CI again (a flaky check must not freeze staging); a second one freezes."""
     if (
         state.status is not Status.VERIFYING_STAGING
         or state.revert_head is None
@@ -480,6 +485,11 @@ def plan_revert_ci(
         return []
     latest = {r.name: r for r in runs if r.head_sha == state.revert_head and r.conclusion}
     results = [latest[name].conclusion == "success" for name in dod_items if name in latest]
+    rerun_at = state.revert_ci_rerun_at
+    if False in results and rerun_at is not None and now < rerun_at + RERUN_GRACE:
+        return []  # the failure listed may still be the old run, not the one just dispatched
+    if False in results and state.revert_ci_reruns < REVERT_CI_RERUNS:
+        return [Proposed("revert_ci_rerun", {"head": state.revert_head, "at": now})]
     if False in results:
         passed = False
     elif len(results) == len(dod_items):

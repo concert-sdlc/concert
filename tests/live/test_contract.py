@@ -11,7 +11,7 @@ import hashlib
 import pytest
 
 from concert.core.ci import CheckRun
-from concert.github.api import BinaryBlob, Conflict, GitHubError, NotFound, StaleHead
+from concert.github.api import BinaryBlob, Conflict, Forbidden, GitHubError, NotFound, StaleHead
 from tests.live.conftest import Live, wait_for
 
 AUTHOR = "concert-live"
@@ -280,3 +280,26 @@ def test_a_file_over_one_megabyte_is_read_not_reported_empty(live: Live) -> None
     text = "event line\n" * 120_000  # about 1.3 MB
     gh.commit(branch, "big", {f"{live.prefix}/big.jsonl": text}, AUTHOR, AUTHOR)
     assert gh.read_file(branch, f"{live.prefix}/big.jsonl") == text
+
+
+def test_ci_can_be_dispatched_on_a_branch(live: Live) -> None:
+    """Needs the PM App's Actions: write permission; the revert-CI re-run depends on it."""
+    branch = f"{live.prefix}/dispatch"
+    live.worker.create_branch(branch, _base(live))
+    try:
+        live.pm.dispatch_ci(branch)
+    except Forbidden:
+        pytest.skip("the PM App lacks Actions: write (edit the App's permissions and accept them)")
+    runs = wait_for(
+        lambda: (
+            live.pm.http.json(
+                "GET",
+                f"/repos/{live.settings.owner}/{live.settings.repo}/actions/runs",
+                None,
+                {"branch": branch, "event": "workflow_dispatch"},
+            )["workflow_runs"]
+            or None
+        ),
+        seconds=60,
+    )
+    assert runs is not None, "the dispatched run never appeared"

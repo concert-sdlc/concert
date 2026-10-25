@@ -764,10 +764,17 @@ def test_green_checks_on_the_revert_head_clear_the_revert_for_merging() -> None:
     assert log.apply(proposals).state().revert_ci_passed is True
 
 
-def test_a_failing_check_on_the_revert_head_is_recorded() -> None:
+def test_a_first_failing_check_on_the_revert_head_asks_for_another_run() -> None:
     log = reverting_log()
-    proposals = plan_revert_ci(log.state(), [check("tests", "failure")], frozenset({"tests"}))
-    assert proposals[0].data["passed"] is False
+    [rerun] = plan_revert_ci(log.state(), [check("tests", "failure")], frozenset({"tests"}), now=50)
+    assert rerun.kind == "revert_ci_rerun" and rerun.data["at"] == 50
+
+
+def test_a_failing_check_after_the_rerun_is_recorded() -> None:
+    state = replace(reverting_log().state(), revert_ci_reruns=1, revert_ci_rerun_at=0)
+    proposals = plan_revert_ci(state, [check("tests", "failure")], frozenset({"tests"}), now=500)
+    assert proposals[0].kind == "revert_ci" and proposals[0].data["passed"] is False
+    assert plan_revert_ci(state, [check("tests", "failure")], frozenset({"tests"}), now=60) == []
 
 
 def test_the_revert_waits_for_unfinished_or_missing_checks() -> None:

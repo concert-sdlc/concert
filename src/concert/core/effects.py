@@ -151,6 +151,14 @@ def _plan_revert(state: IssueState) -> Effect | None:
         if state.pr_number is None:
             return None
         return Effect("revert_pr", "revert_pr", {"number": state.pr_number}, resumed=False)
+    key = f"ci:{state.revert_ci_reruns}"
+    if (
+        state.revert_ci_reruns > 0
+        and state.revert_branch is not None
+        and state.revert_ci_passed is None
+        and key not in state.dispatched
+    ):
+        return Effect(key, "dispatch_ci", {"ref": state.revert_branch}, resumed=False)
     if state.revert_ci_passed and state.revert_head is not None:
         data = {
             "number": state.revert_pr,

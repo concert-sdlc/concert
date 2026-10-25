@@ -55,6 +55,7 @@ class FakeGitHub:
     refs: dict[str, str] = field(default_factory=dict[str, str])
     prs: dict[int, _Pr] = field(default_factory=dict[int, _Pr])
     check_runs: list[CheckRun] = field(default_factory=list[CheckRun])
+    dispatched: list[str] = field(default_factory=list[str])
     reviews: dict[int, list[PrReview]] = field(default_factory=dict[int, list[PrReview]])
 
     def tick(self, seconds: int) -> None:
@@ -354,6 +355,15 @@ class FakeClient:
             ),
             None,
         )
+
+    def dispatch_ci(self, ref: str) -> None:
+        """A new run starts on the branch head: its checks are running until a test sets them."""
+        self.fake.dispatched.append(ref)
+        head = self.fake.resolve(ref)
+        self.fake.check_runs = [
+            CheckRun(r.name, r.head_sha, None, r.workflow_hash) if r.head_sha == head else r
+            for r in self.fake.check_runs
+        ]
 
     def mark_ready(self, number: int) -> PullRequest:
         record = self._pr(number)

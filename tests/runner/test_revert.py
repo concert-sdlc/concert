@@ -70,13 +70,54 @@ def test_a_verified_revert_sends_the_issue_back_to_implementing() -> None:
     assert world.poll(issue).status is Status.IMPLEMENTING
 
 
-def test_failing_checks_on_the_revert_freeze_the_issue_without_merging_it() -> None:
+def test_a_failing_check_on_the_revert_runs_ci_once_more_before_anything_freezes() -> None:
     world, issue, _merge = failed_world()
     world.poll(issue)
-    world.fake.add_check_run(world.state(issue).revert_head or "", "tests", "failure", "w1")
+    head = world.state(issue).revert_head or ""
+    world.fake.add_check_run(head, "tests", "failure", "w1")
+    before = world.pm.get_ref("staging")
+    assert world.poll(issue).status is Status.VERIFYING_STAGING  # waiting for the second run
+    assert world.fake.dispatched == [world.state(issue).revert_branch]
+    assert world.state(issue).revert_ci_reruns == 1 and world.state(issue).revert_ci_passed is None
+    world.poll(issue)
+    assert len(world.fake.dispatched) == 1  # dispatched once, not on every poll
+    assert world.pm.get_ref("staging") == before
+
+
+def test_a_flaky_failure_that_passes_on_the_second_run_merges_the_revert() -> None:
+    world, issue, _merge = failed_world()
+    world.poll(issue)
+    head = world.state(issue).revert_head or ""
+    world.fake.add_check_run(head, "tests", "failure", "w1")
+    world.poll(issue)
+    world.fake.tick(300)
+    world.fake.add_check_run(head, "tests", "success", "w1")  # the dispatched run
+    world.poll(issue)
+    assert world.state(issue).revert_merge_sha is not None
+
+
+def test_two_failing_runs_on_the_revert_freeze_the_issue_without_merging_it() -> None:
+    world, issue, _merge = failed_world()
+    world.poll(issue)
+    head = world.state(issue).revert_head or ""
+    world.fake.add_check_run(head, "tests", "failure", "w1")
+    world.poll(issue)
+    world.fake.tick(300)
+    world.fake.add_check_run(head, "tests", "failure", "w1")
     before = world.pm.get_ref("staging")
     assert world.poll(issue).status is Status.BLOCKED
     assert world.pm.get_ref("staging") == before
+
+
+def test_the_old_failure_is_not_read_as_the_new_run_right_after_the_dispatch() -> None:
+    world, issue, _merge = failed_world()
+    world.poll(issue)
+    head = world.state(issue).revert_head or ""
+    world.fake.add_check_run(head, "tests", "failure", "w1")
+    world.poll(issue)  # dispatches; the fake now lists the new run as running
+    world.fake.add_check_run(head, "tests", "failure", "w1")  # a lagging listing: the old failure
+    world.fake.tick(10)
+    assert world.poll(issue).status is Status.VERIFYING_STAGING  # still inside the grace
 
 
 def test_a_revert_that_touches_protected_paths_is_not_merged() -> None:

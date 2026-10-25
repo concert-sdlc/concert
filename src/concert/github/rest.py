@@ -429,6 +429,13 @@ class RestGitHub:
         found = next((raw for raw in pages if str(raw["head"]["ref"]).startswith(prefix)), None)
         return _pr(found) if found else None
 
+    def dispatch_ci(self, ref: str) -> None:
+        """Run the CI workflow on a branch again (it accepts workflow_dispatch). Needs the PM
+        App's Actions: write permission."""
+        self.http.json(
+            "POST", self._repo("/actions/workflows/concert-ci.yml/dispatches"), {"ref": ref}
+        )
+
     def mark_ready(self, number: int) -> PullRequest:
         node = self.http.json("GET", self._repo(f"/pulls/{number}"))["node_id"]
         self.http.graphql(
