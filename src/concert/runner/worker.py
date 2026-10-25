@@ -95,6 +95,7 @@ class Worker:
         self._unpostable: set[str] = set()  # runs whose report GitHub refused: not paid for twice
         self._paused: dict[str, int] = {}  # run_id -> when a usage limit lets it run again
         self._pauses: dict[str, int] = {}  # run_id -> how many times it was paused
+        self._given_up: set[str] = set()  # paused past the budget: left to lapse, not run again
         self.runner = runner
         self.me = me  # this runner's Worker App identity
         self.pm = pm
@@ -114,17 +115,17 @@ class Worker:
             if c.author.user_id == self.me.user_id
             for run in _run_markers(c.body)
         }
-        self._paused = {
-            r: until
-            for r, until in self._paused.items()
-            if r in {a.run_id for a in state.active_runs}
-        }
+        live = {a.run_id for a in state.active_runs}
+        self._paused = {r: until for r, until in self._paused.items() if r in live}
+        self._pauses = {r: n for r, n in self._pauses.items() if r in live}
+        self._given_up &= live
         mine = [
             run
             for run in state.active_runs
             if run.runner == self.runner
             and run.run_id not in reported
             and run.run_id not in self._unpostable
+            and run.run_id not in self._given_up
             and run.state == state.status.value
         ]
         done: list[str] = []
@@ -140,6 +141,8 @@ class Worker:
                 self._pauses[run.run_id] = self._pauses.get(run.run_id, 0) + 1
                 if resume - now <= PAUSE_BUDGET and self._pauses[run.run_id] <= MAX_PAUSES:
                     self._paused[run.run_id] = resume
+                else:  # no more waiting: stop running it and stop beating for it, so the lease
+                    self._given_up.add(run.run_id)  # lapses and the PM charges and reassigns
                 continue
             except AgentFailure:
                 continue

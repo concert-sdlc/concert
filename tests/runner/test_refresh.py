@@ -151,3 +151,85 @@ def test_no_rebase_is_planned_without_a_moved_staging_or_past_the_limit() -> Non
     assert effect is not None and effect.action == "rebase" and effect.data["head"] == "h1"
     assert plan_effect(state, 3, "staging", staging_moved=False, refresh_limit=2) is None
     assert plan_effect(state, 3, "staging", staging_moved=True, refresh_limit=1) is None
+
+
+# --- a rebase never overwrites work it did not plan for ---------------------------------------------
+
+
+def pending_rebase(project: Project) -> tuple[str, str]:
+    """UAT passed with staging ahead, and a rebase intent announced but not yet carried out."""
+    world, issue = project.world, project.issue
+    to_uat(project)
+    head = world.state(issue).head_sha or ""
+    staging_moves(project, {"docs/other.md": "x"})
+    world.pm_post(
+        issue,
+        "intent",
+        {
+            "key": "rebase:0:0",
+            "action": "rebase",
+            "stage": "uat",
+            "branch": f"pm/{issue}",
+            "head": head,
+        },
+    )
+    return head, f"pm/{issue}"
+
+
+def test_a_resumed_rebase_refuses_to_overwrite_a_branch_that_moved_meanwhile() -> None:
+    project = Project()
+    world, issue = project.world, project.issue
+    head, branch = pending_rebase(project)
+    foreign = world.worker_commit(branch, {"notes.txt": "someone pushed"})
+    world.fake.tick(1)
+    result = world.poll(issue)
+    assert result.status is Status.BLOCKED
+    assert "moved" in (world.state(issue).note or "")
+    assert world.pm.get_ref(branch) == foreign != head  # their push is still there
+
+
+def test_a_rebase_that_moved_the_branch_before_a_crash_is_adopted_not_redone() -> None:
+    project = Project()
+    world, issue = project.world, project.issue
+    head, branch = pending_rebase(project)
+    gh = world.fake.client(world.pm_identity)
+    gh.create_branch("scratch", "staging")
+    done = gh.commit(
+        "scratch", "Rebase", {"backend/export.py": "def export(): ..."}, author="pm", committer="pm"
+    )
+    gh.update_ref(branch, done, force=True)  # the previous attempt got this far
+    world.fake.tick(1)
+    world.poll(issue)
+    state = world.state(issue)
+    assert state.head_sha == done != head and state.pm_commits == (done,)
+
+
+# --- the queue-head rebase is bounded ---------------------------------------------------------------
+
+
+def test_staging_that_keeps_moving_at_the_queue_head_ends_in_a_block_not_a_loop() -> None:
+    project = Project()
+    project.world.config = replace(project.world.config, queue_rebases=1)
+    world, issue = project.world, project.issue
+    to_uat(project)
+    project.run_until(Status.HUMAN_UAT)
+    old = world.state(issue).head_sha or ""
+    world.fake.add_check_run(old, "tests", "success", "w1")
+    project.step()
+    staging_moves(project, {"docs/late.md": "1"})
+    project.human(f"/approve uat {old}")
+    for _ in range(10):
+        project.step()
+        if world.state(issue).head_sha != old:
+            break
+    project.run_until(Status.HUMAN_UAT)  # one rebase, as allowed
+    assert world.state(issue).staging_rebases == 1
+    newer = world.state(issue).head_sha or ""
+    world.fake.add_check_run(newer, "tests", "success", "w1")
+    project.step()
+    staging_moves(project, {"docs/later.md": "2"})
+    project.human(f"/approve uat {newer}")
+    project.run_until(Status.BLOCKED)
+    assert "moved again after 1 rebases" in (
+        world.state(issue).blocked_reason or world.state(issue).note or ""
+    )

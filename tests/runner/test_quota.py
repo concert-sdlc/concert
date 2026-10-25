@@ -90,10 +90,29 @@ def test_a_run_that_keeps_hitting_the_limit_is_eventually_left_to_lapse() -> Non
 
     world, issue, run = setup()
     now = world.fake.now
-    w = Worker(world.fake.client(VM1), "vm-1", VM1, PM, Limited(until=None, times=10_000))
+    agent = Limited(until=None, times=10_000)
+    w = Worker(world.fake.client(VM1), "vm-1", VM1, PM, agent)
     for _ in range(MAX_PAUSES + 1):
         now += 1_000
         w.run_once(issue, now)
     w.beat(now)
+    beat = read_heartbeat(world.pm, "vm-1")
+    assert beat is not None and run not in beat.run_ids
+    tries = len(agent.tasks)
+    for step in range(1, 6):  # and it is not run again, however often the loop comes round
+        w.run_once(issue, now + step * 1_000)
+    assert len(agent.tasks) == tries
+
+
+def test_a_reset_beyond_the_wait_budget_is_not_run_again_either() -> None:
+    world, issue, run = setup()
+    now = world.fake.now
+    agent = Limited(until=now + 20 * 3600, times=10_000)
+    w = Worker(world.fake.client(VM1), "vm-1", VM1, PM, agent)
+    w.run_once(issue, now)
+    for step in range(1, 4):
+        w.run_once(issue, now + step * 60)
+    assert len(agent.tasks) == 1
+    w.beat(now + 200)
     beat = read_heartbeat(world.pm, "vm-1")
     assert beat is not None and run not in beat.run_ids

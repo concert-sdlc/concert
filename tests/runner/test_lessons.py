@@ -136,3 +136,15 @@ def test_lessons_reach_the_prompt_fenced_as_data() -> None:
 
 def test_the_state_derives_from_the_log_without_lesson_events() -> None:
     assert derive([]).lessons_proposed == ()
+
+
+def test_steering_keeps_only_the_latest_hundred_proposals() -> None:
+    from concert.core.admin import MAX_LESSONS, fold_admin
+
+    events = [
+        {"kind": "admin_command", "data": {"comment_id": n, "command": "lesson", "text": f"L{n}"}}
+        for n in range(MAX_LESSONS + 20)
+    ]
+    state = fold_admin(events)
+    assert len(state.lessons) == MAX_LESSONS and state.lessons[-1] == f"L{MAX_LESSONS + 19}"
+    assert state.lessons[0] == "L20"

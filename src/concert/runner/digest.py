@@ -32,8 +32,11 @@ def post_digest_once_a_day(
     return True
 
 
-def render_digest(digest: Digest, attention: Sequence[str] = ()) -> str:
+def render_digest(digest: Digest, attention: Sequence[str] = (), since: int | None = None) -> str:
     lines = [f"## Daily digest, {utc_day(digest.now)}", ""]
+    if since:
+        started = datetime.fromtimestamp(since, UTC).strftime("%Y-%m-%d %H:%M UTC")
+        lines += [f"_The figures cover the issues this runner has seen since {started}._", ""]
     for label, week in zip(("This week", "Last week"), digest.weeks, strict=True):
         lines += _week_lines(label, week)
     lines += ["", "### Reverts, by the week of the merge they undid"]

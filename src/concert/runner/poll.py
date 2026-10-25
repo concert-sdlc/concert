@@ -57,6 +57,7 @@ from concert.core.handoff import (
     accept_handoff,
 )
 from concert.core.kits import (
+    KIT_LIMIT,
     KitFacts,
     blocker_marker,
     has_marker,
@@ -107,6 +108,7 @@ class RunnerConfig:
     on_failure: str = "freeze"  # staging verification: "freeze" or "auto_revert"
     verify_reruns: int = 1  # automatic re-runs of a failed verification (flaky tests)
     pregate_refresh: int = 2  # rebases onto a moved staging before the human UAT kit, at most
+    queue_rebases: int = 3  # rebases at the queue head, at most, before an admin is asked
     docs_paths: Sequence[str] = ("docs/**", "*.md")  # a docs issue may change only these
 
 
@@ -596,6 +598,7 @@ class _Poll:
                 auto_revert=self.config.on_failure == "auto_revert",
                 staging_moved=self._staging_moved(),
                 refresh_limit=self.config.pregate_refresh,
+                queue_rebase_limit=self.config.queue_rebases,
             )
             if effect is None:
                 return
@@ -768,6 +771,15 @@ class _Poll:
             return self._block(f"reclassified to a code issue after review: {shown}")
         return False
 
+    def _workflow_kit(
+        self, issue: int, parent: int | None, files: Mapping[str, str], digest: str
+    ) -> str:
+        diffs = [
+            (path, render_diff(path, self.github.read_file(self.config.base_branch, path), text))
+            for path, text in sorted(files.items())
+        ]
+        return render_workflow_kit(issue, parent, diffs, digest)
+
     def _file_workflow(self, run_id: str, digest: str) -> dict[str, int | str | None]:
         """Turn an accepted run's workflow change request into a `workflow` issue holding exactly
         those files. Looks for the issue first, so a crash does not file it twice."""
@@ -776,6 +788,8 @@ class _Poll:
         problem = "the request is no longer in its handoff" if not files else problem_with(files)
         if problem is None and diff_hash(files) != digest:
             problem = "the request changed after it was accepted"
+        if problem is None and len(self._workflow_kit(0, self.issue, files, digest)) > KIT_LIMIT:
+            problem = "its diff is too large to show an admin in one comment"
         if problem is not None:
             self.invalid.append(f"workflow change request of {run_id}: {problem}")
             return {"issue": 0}
@@ -861,6 +875,22 @@ class _Poll:
         planned = plan_refresh(self.state)
         if planned:
             self._post(planned)
+            return
+        state = self.state
+        if (
+            state.status is Status.INTEGRATING
+            and state.issue_type is not IssueType.REVERT
+            and state.staging_rebases >= self.config.queue_rebases
+            and not state.settled_runs
+            and not state.active_runs
+            and state.merge_sha is None
+            and not state.pending_intents
+            and self._staging_moved()
+        ):  # every rebase sends it back through review and UAT: past the bound, a person decides
+            self._block(
+                f"staging moved again after {state.staging_rebases} rebases at the head of the "
+                "queue; an admin should re-queue it once staging settles"
+            )
 
     def _rebase(self, branch: str, head: str, stage: str) -> dict[str, int | str | None]:
         """Re-apply what the branch changed on top of the current base head, file by file. A file
@@ -871,6 +901,15 @@ class _Poll:
         target = github.get_ref(self.config.base_branch)
         if target is None:
             return {"error": f"no {self.config.base_branch} branch"}
+        current = github.get_ref(branch)
+        if current != head:
+            # An earlier attempt may have moved the branch and crashed before its outcome: that
+            # result is kept. Anything else is a push this rebase knows nothing about.
+            if current is not None and (
+                current == target or github.commit_parents(current) == (target,)
+            ):
+                return {"sha": current, "base": target}
+            return {"error": f"{branch} moved to {current} while a rebase of {head} was pending"}
         own = github.list_commits(
             self.config.base_branch, head
         )  # the branch's commits, oldest first

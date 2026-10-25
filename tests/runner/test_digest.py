@@ -1,5 +1,9 @@
 """The daily digest: rendered from the metrics, posted once per UTC day."""
 
+from typing import Any
+
+import pytest
+
 from concert.core.metrics import DAY, compute
 from concert.runner.digest import post_digest_once_a_day, render_digest, utc_day
 from tests.core.test_metrics import MON, NOW, Log
@@ -62,3 +66,30 @@ def test_the_service_keeps_a_finished_issue_in_the_figures() -> None:
     assert r.issue in r.service._history  # pyright: ignore[reportPrivateUsage]
     status, timeline = r.service._history[r.issue]  # pyright: ignore[reportPrivateUsage]
     assert status == "inbox" and timeline and timeline[0].event.kind == "created"
+
+
+def test_the_service_works_out_the_digest_once_a_day_not_on_every_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from concert.runner import service as service_module
+
+    calls: list[int] = []
+    original = service_module.post_digest_once_a_day
+
+    def counting(*args: Any) -> bool:
+        calls.append(1)
+        return original(*args)
+
+    monkeypatch.setattr(service_module, "post_digest_once_a_day", counting)
+    r = rig(steering=True)
+    for _ in range(5):
+        tick(r)
+    assert len(calls) == 1
+    r.world.fake.tick(DAY)
+    tick(r)
+    assert len(calls) == 2
+
+
+def test_the_digest_says_which_issues_its_figures_cover() -> None:
+    text = render_digest(compute([], NOW), since=NOW - 3600)
+    assert "cover the issues this runner has seen since" in text

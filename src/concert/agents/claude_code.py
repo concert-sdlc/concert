@@ -94,6 +94,7 @@ class ClaudeCodeAgent:
 
 
 _RESET = re.compile(r"limit reached\|(\d{9,11})")
+_TAIL = 3  # lines at the end of a stream that can be the CLI's own error
 _HTTP_429 = re.compile(r"(?:api error|status|http|error)[: ]+429\b", re.IGNORECASE)
 _LIMITS = (
     "usage limit",
@@ -107,9 +108,11 @@ _LIMITS = (
 
 
 def _quota_pause(stdout: str, stderr: str, now: int) -> QuotaPause | None:
-    """Recognise a usage or rate limit in what the CLI printed. The subscription message carries
-    the reset time as `...limit reached|<epoch>`; other limits give none."""
-    text = f"{stdout}\n{stderr}"
+    """Recognise a usage or rate limit in the CLI's own error. Only its error result and the end of
+    its error stream are read: the rest of the output is the agent's and whatever it ran, which an
+    issue body could make say anything. The subscription message carries the reset time as
+    `...limit reached|<epoch>`; other limits give none."""
+    text = "\n".join(_cli_error_lines(stdout, stderr))
     reset = _RESET.search(text)
     if reset is not None:
         until = int(reset.group(1))
@@ -118,6 +121,22 @@ def _quota_pause(stdout: str, stderr: str, now: int) -> QuotaPause | None:
     if any(marker in lowered for marker in _LIMITS) or _HTTP_429.search(text):
         return QuotaPause("rate or usage limit")
     return None
+
+
+def _cli_error_lines(stdout: str, stderr: str) -> list[str]:
+    lines: list[str] = []
+    try:
+        reply: Any = json.loads(stdout)
+    except json.JSONDecodeError:
+        reply = None
+    if isinstance(reply, dict):  # `--output-format json`: the error is the result of an error reply
+        result = cast("dict[str, Any]", reply).get("result")
+        if cast("dict[str, Any]", reply).get("is_error") is True and isinstance(result, str):
+            lines.append(result)
+    else:
+        lines += [line for line in stdout.splitlines() if line.strip()][-_TAIL:]
+    lines += [line for line in stderr.splitlines() if line.strip()][-_TAIL:]
+    return lines
 
 
 def build_prompt(task: AgentTask) -> str:

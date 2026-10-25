@@ -18,6 +18,7 @@ class CheckRun:
     head_sha: str
     conclusion: str | None  # None until the run has finished
     workflow_hash: str  # hash of the workflow file that produced the run
+    completed_at: int | None = None  # epoch seconds; None when GitHub gave no time
 
 
 @dataclass(frozen=True)

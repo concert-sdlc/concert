@@ -384,6 +384,9 @@ class RestGitHub:
                     head_sha=str(run["head_sha"]),
                     conclusion=run.get("conclusion"),
                     workflow_hash=self._workflow_hash(sha, path) if path else "",
+                    completed_at=_epoch(str(run["completed_at"]))
+                    if run.get("completed_at")
+                    else None,
                 )
             )
         return found

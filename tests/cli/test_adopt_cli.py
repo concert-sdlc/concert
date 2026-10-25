@@ -117,3 +117,31 @@ def test_check_arguments_must_look_like_name_equals_command() -> None:
     assert adopting._checks(["a=b c"]) == {"a": "b c"}  # pyright: ignore[reportPrivateUsage]
     with pytest.raises(AdoptStop):
         adopting._checks(["nonsense"])  # pyright: ignore[reportPrivateUsage]
+
+
+def test_the_counts_in_the_report_leave_out_what_adopt_creates() -> None:
+    """The first run creates branches and the Steering issue; the report an admin approves must
+    read the same on the run after the approval, or the approval would never match."""
+    before = adopting.stable_counts(
+        default="main",
+        staging="staging",
+        branches=["main", "feature/x"],
+        pull_heads=["feature/x"],
+        issue_titles=["Bug", "Idea"],
+    )
+    after = adopting.stable_counts(
+        default="main",
+        staging="staging",
+        branches=[
+            "main",
+            "feature/x",
+            "staging",
+            "concert-events",
+            "concert-evidence",
+            "concert-heartbeats/vm-1",
+            "concert/init",
+        ],
+        pull_heads=["feature/x", "concert/init", "concert/init-workflows"],
+        issue_titles=["Bug", "Idea", "Concert steering"],
+    )
+    assert before == after == (1, 1, 2)

@@ -23,6 +23,9 @@ class KitFacts:
     protected_files: Sequence[str] = ()  # these need an admin's approving PR review
 
 
+KIT_LIMIT = 60_000  # GitHub refuses a comment over 65,536 characters
+
+
 def kit_marker(kind: str, revision: str) -> str:
     return f"<!-- pm-kit:{kind}:{revision} -->"
 

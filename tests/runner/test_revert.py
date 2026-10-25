@@ -278,3 +278,31 @@ def test_a_crash_while_building_the_re_landing_branch_recovers() -> None:
     world.poll(issue)
     assert world.state(issue).branch_base == crashed_at  # no second re-applying commit
     assert world.pm.get_ref(branch) == crashed_at
+
+
+def test_a_failure_that_finished_before_the_dispatch_is_never_the_new_result() -> None:
+    """However long the new run takes to start, the old failure listed meanwhile does not freeze."""
+    world, issue, _merge = failed_world()
+    world.poll(issue)
+    head = world.state(issue).revert_head or ""
+    world.fake.add_check_run(head, "tests", "failure", "w1")
+    world.poll(issue)  # dispatched at this moment
+    old = world.fake.now
+    world.fake.add_check_run(head, "tests", "failure", "w1")
+    world.fake.check_runs[-1] = world.fake.check_runs[-1].__class__(
+        "tests", head, "failure", "w1", old - 50
+    )  # finished before the dispatch
+    world.fake.tick(1_800)  # far past the grace: the queue is slow, not the check
+    assert world.poll(issue).status is Status.VERIFYING_STAGING
+    world.fake.add_check_run(head, "tests", "failure", "w1")  # the new run really fails
+    assert world.poll(issue).status is Status.BLOCKED
+
+
+def test_a_dispatch_that_never_produces_a_result_is_judged_after_an_hour() -> None:
+    world, issue, _merge = failed_world()
+    world.poll(issue)
+    head = world.state(issue).revert_head or ""
+    world.fake.add_check_run(head, "tests", "failure", "w1")
+    world.poll(issue)
+    world.fake.tick(3_700)
+    assert world.poll(issue).status is Status.BLOCKED

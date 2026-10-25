@@ -170,6 +170,6 @@ def _process_yaml(
                 ],
             }
         },
-        "integration": {"pregate_refresh": 2},
+        "integration": {"pregate_refresh": 2, "max_queue_rebases": 3},
         "states": {"verifying_staging": {"rerun_on_failure": 1, "on_failure": "auto_revert"}},
     }

@@ -149,3 +149,11 @@ def test_the_request_rules_and_the_hash() -> None:
     assert diff_hash({"a": "1", "b": "2"}) == diff_hash({"b": "2", "a": "1"})
     assert diff_hash({"a": "1"}) != diff_hash({"a": "2"})
     assert render_diff("x.yml", None, "a\n").startswith("--- /dev/null")
+
+
+def test_a_request_whose_diff_cannot_fit_in_a_comment_is_not_filed() -> None:
+    """Escaping turns each < into &lt;, so a request under the byte cap can still render too big."""
+    angle = "<" * 30_000  # 30 kB of source, 120 kB once escaped
+    world, issue, wf = with_request({WORKFLOW: f"name: x\n# {angle}\n"})
+    state = world.state(issue)
+    assert wf == 0 and state.workflow_issues == () and state.workflow_requests == ()

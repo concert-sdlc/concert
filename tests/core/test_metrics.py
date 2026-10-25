@@ -32,6 +32,12 @@ class Log:
     def move(self, at: int, source: str, target: str, trigger: str = "x") -> "Log":
         return self.add(at, "transition", {"from": source, "to": target, "trigger": trigger})
 
+    def revert(self, at: int) -> "Log":
+        """The PM merged an auto-revert of this issue's merge, and verification of it passed."""
+        self.add(at, "intent", {"key": f"revert{at}", "action": "merge_revert"})
+        self.add(at, "outcome", {"key": f"revert{at}", "result": {"sha": "rev"}})
+        return self.move(at + 1, "verifying_staging", "implementing", "failed_reverted")
+
     def charge(self, cause: str) -> "Log":
         return self.add(MON, "counter_charged", {"cause": cause})
 
@@ -127,13 +133,13 @@ def test_a_revert_is_attributed_to_the_week_of_the_original_merge() -> None:
     last_week = MON - WEEK + DAY
     old = Log().landed(last_week - DAY, last_week)
     old.merge(last_week)
-    old.move(NOW - 10, "verifying_staging", "implementing", "failed_reverted")  # reverted this week
+    old.revert(NOW - 10)  # reverted this week
     fine = Log().landed(last_week - DAY, last_week)
     fine.merge(last_week)
     twice = Log().landed(MON, MON + 3600)
     twice.merge(MON + 10)
-    twice.move(MON + 20, "verifying_staging", "implementing", "failed_reverted")
-    twice.move(MON + 30, "verifying_staging", "implementing", "failed_reverted")
+    twice.revert(MON + 20)
+    twice.revert(MON + 30)
     result = digest([old, fine, twice])
     previous, current = result.reverts[1], result.reverts[0]
     assert (previous.merged, previous.reverted_issues, previous.rate) == (2, 1, 0.5)

@@ -68,3 +68,22 @@ def test_a_reset_time_in_the_past_is_ignored() -> None:
     with pytest.raises(QuotaPause) as caught:
         run(Limited(1, "usage limit reached|500"))
     assert caught.value.until is None
+
+
+def test_a_limit_phrase_in_the_agents_own_output_is_not_a_limit() -> None:
+    """The agent (or an issue body steering it) can print anything: a success reply that merely
+    mentions a limit, and phrases buried in the middle of long output, are ordinary failures."""
+    chatty = "\n".join(["usage limit reached|1900000000", *["compiling..."] * 10])
+    with pytest.raises(AgentFailure) as caught:
+        run(Limited(1, chatty))
+    assert not isinstance(caught.value, QuotaPause)
+    reply = json.dumps({"is_error": False, "result": "I hit the rate limit of my tests"})
+    with pytest.raises(AgentFailure) as caught:
+        run(Limited(1, reply))
+    assert not isinstance(caught.value, QuotaPause)
+
+
+def test_an_error_reply_of_the_cli_is_read_from_its_result_field() -> None:
+    reply = json.dumps({"is_error": True, "result": "API Error: 429 rate_limit_error"})
+    with pytest.raises(QuotaPause):
+        run(Limited(1, reply))

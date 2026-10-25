@@ -48,6 +48,7 @@ def plan_effect(
     awaiting_human: bool = False,
     staging_moved: bool = False,
     refresh_limit: int = 0,
+    queue_rebase_limit: int = 1_000_000,
 ) -> Effect | None:
     """`gate_ready`: every merge requirement holds on the current head; `awaiting_human`: only human
     approvals are still missing; `staging_moved`: staging advanced since the branch base (the
@@ -92,7 +93,7 @@ def plan_effect(
         if key in state.questions_posted:
             return None
         return Effect(key, "post_question", {"doubts": list(state.doubts)}, resumed=False)
-    rebase = _plan_rebase(state, issue, staging_moved, refresh_limit)
+    rebase = _plan_rebase(state, issue, staging_moved, refresh_limit, queue_rebase_limit)
     if rebase is not None:
         return rebase
     kit = _plan_kit(state, awaiting_human)
@@ -126,7 +127,7 @@ def _plan_workflow(state: IssueState) -> Effect | None:
 
 
 def _plan_rebase(
-    state: IssueState, issue: int, staging_moved: bool, refresh_limit: int
+    state: IssueState, issue: int, staging_moved: bool, refresh_limit: int, queue_limit: int
 ) -> Effect | None:
     """Bring the branch up to the staging head: before the human UAT kit (a bounded pre-gate
     refresh, once automated UAT has passed) and when the issue reaches the queue head and
@@ -146,6 +147,7 @@ def _plan_rebase(
         and not state.active_runs
         and not state.settled_runs
         and state.merge_sha is None
+        and state.staging_rebases < queue_limit
     ):
         stage = "integrating"
     else:

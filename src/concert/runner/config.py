@@ -51,6 +51,9 @@ def load_runner_config(text: str, epoch: int, base_branch: str) -> RunnerConfig:
     refresh = _mapping(doc.get("integration")).get("pregate_refresh", 2)
     if not isinstance(refresh, int) or isinstance(refresh, bool) or refresh < 0:
         raise ConfigError("integration.pregate_refresh must be a non-negative integer")
+    queue_rebases = _mapping(doc.get("integration")).get("max_queue_rebases", 3)
+    if not isinstance(queue_rebases, int) or isinstance(queue_rebases, bool) or queue_rebases < 0:
+        raise ConfigError("integration.max_queue_rebases must be a non-negative integer")
     raw_docs: Any = _mapping(_mapping(doc.get("issue_types")).get("docs")).get(
         "paths", list(DEFAULT_DOCS_PATHS)
     )
@@ -94,6 +97,7 @@ def load_runner_config(text: str, epoch: int, base_branch: str) -> RunnerConfig:
         on_failure=str(on_failure),
         verify_reruns=int(verify.get("rerun_on_failure", 1)),
         pregate_refresh=refresh,
+        queue_rebases=queue_rebases,
         docs_paths=tuple(docs),
     )
 

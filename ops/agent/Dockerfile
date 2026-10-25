@@ -9,9 +9,11 @@
 #                                                         USER root / RUN apt-get ... / USER 10001
 FROM node:22-slim
 
-ARG CLAUDE_CODE_VERSION=latest
+# no default: the CLI that handles the model credential must be a version you chose
+ARG CLAUDE_CODE_VERSION
 
-RUN apt-get update \
+RUN test -n "$CLAUDE_CODE_VERSION" \
+ && apt-get update \
  && apt-get install -y --no-install-recommends \
       git ca-certificates ripgrep python3 make curl \
  && rm -rf /var/lib/apt/lists/* \

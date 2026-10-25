@@ -138,9 +138,6 @@ def observe(issue: int, timed: Sequence[Timed], status: str = "") -> Observation
                 close("on_staging", at)
             elif target == "closed":
                 close("closed", at)
-            elif str(data["trigger"]) == "failed_reverted":
-                revert_events += 1
-                reverted = True
         elif kind == "intent":
             actions[str(data["key"])] = str(data["action"])
         elif kind == "outcome":

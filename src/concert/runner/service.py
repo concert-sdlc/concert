@@ -20,7 +20,7 @@ from concert.github.mirror import Mirror
 from concert.runner.admin import mark_reset_applied, process_steering
 from concert.runner.config import ConfigError, load_runner_config
 from concert.runner.cycle import run_cycle
-from concert.runner.digest import post_digest_once_a_day, render_digest
+from concert.runner.digest import post_digest_once_a_day, render_digest, utc_day
 from concert.runner.poll import FactsProvider, RunnerConfig
 from concert.runner.status import render_board, render_issue
 from concert.runner.worker import Worker
@@ -43,6 +43,8 @@ class Service:
     _known: dict[int, IssueState] = field(default_factory=dict[int, IssueState])
     _config: tuple[str, RunnerConfig] | None = None
     _admin: AdminState = field(default_factory=AdminState)
+    _digest_day: str = ""  # the UTC day whose digest is posted (or found already posted)
+    _started: int = 0  # when this process first ticked: the figures cover issues seen since
     # each issue's last status and event timeline, kept after it closes so the digest can count it
     _history: dict[int, tuple[str, tuple[Timed, ...]]] = field(
         default_factory=dict[int, tuple[str, tuple[Timed, ...]]]
@@ -50,6 +52,7 @@ class Service:
 
     def tick(self) -> None:
         now = int(self.clock())
+        self._started = self._started or now
         config = self._load_config()
         if self.runner not in config.runner_ids:
             raise ConfigError(f"runner {self.runner!r} is not registered in {PROCESS_FILE}")
@@ -91,12 +94,13 @@ class Service:
 
     def _digest(self, config: RunnerConfig, now: int) -> None:
         """Once a day, in Steering: the delivery metrics and what needs a person's attention."""
-        if self.steering is None:
-            return
+        if self.steering is None or utc_day(now) == self._digest_day:
+            return  # nothing to build, fetch or compare until the day changes
         try:
             figures = compute([observe(n, tl, st) for n, (st, tl) in self._history.items()], now)
-            body = render_digest(figures, self._attention(config, now))
+            body = render_digest(figures, self._attention(config, now), since=self._started)
             post_digest_once_a_day(self.pm_github, self.steering, config.pm, now, body)
+            self._digest_day = utc_day(now)
         except Exception as error:  # noqa: BLE001  a digest problem must not stop the PM
             self.errors.append(f"digest: {error}")
 

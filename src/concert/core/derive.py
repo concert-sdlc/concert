@@ -114,6 +114,7 @@ class IssueState:
     merge_sha: str | None = None  # the merge commit on the base branch, once the PM merged
     evidence: tuple[Evidence, ...] = ()  # results and approvals, in order, each bound to a head
     refreshes: int = 0  # pre-gate refreshes done (they are bounded and never charged)
+    staging_rebases: int = 0  # rebases at the head of the queue because staging moved while waiting
     refresh_conflicts: int = 0  # rebases onto staging that conflicted
     refresh_result: str | None = None  # "clean" or "conflict" until the issue has moved on
     refresh_note: str | None = None  # the conflicting paths
@@ -456,6 +457,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
                 ),
             )
         if action == "push_workflow":
+            if result.get("error"):
+                return state
             return replace(
                 state,
                 pr_number=int(result["number"]),
@@ -476,6 +479,8 @@ def _apply(state: IssueState, event: Event) -> IssueState:
                 revert_head=str(result["sha"]),
             )
         if action == "rebase":
+            if result.get("error"):
+                return state  # the poll blocks the issue with the reason; nothing moved
             if result.get("conflict"):
                 return replace(
                     state,
@@ -491,6 +496,7 @@ def _apply(state: IssueState, event: Event) -> IssueState:
                 pm_commits=(*state.pm_commits, str(result["sha"])),
                 refresh_result="clean",
                 refreshes=state.refreshes + (1 if pre_gate else 0),
+                staging_rebases=state.staging_rebases + (0 if pre_gate else 1),
                 settled_runs=frozenset(),
                 settled_reviewers=frozenset(),
             )

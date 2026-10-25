@@ -71,6 +71,9 @@ def _issue(token: str) -> int | None:
     return None
 
 
+MAX_LESSONS = 100  # proposals kept from Steering; the oldest fall off
+
+
 @dataclass(frozen=True)
 class AdminState:
     paused: bool = False
@@ -114,5 +117,9 @@ def fold_admin(events: Sequence[Mapping[str, Any]]) -> AdminState:
         elif kind == "admin_reset_applied":
             resets.pop(int(data["issue"]), None)
     return AdminState(
-        paused, frozenset(paused_issues), resets, frozenset(consumed), lessons=tuple(lessons)
+        paused,
+        frozenset(paused_issues),
+        resets,
+        frozenset(consumed),
+        lessons=tuple(lessons[-MAX_LESSONS:]),
     )

@@ -501,7 +501,8 @@ def plan_merged(state: IssueState) -> list[Proposed]:
 
 
 REVERT_CI_RERUNS = 1  # CI is run again once on a failing revert PR before the queue is frozen
-RERUN_GRACE = 120  # seconds the old failed run may still be listed after a re-dispatch
+RERUN_GRACE = 120  # when GitHub gave no time: seconds an old failed run may still be listed
+RERUN_TIMEOUT = 3600  # a dispatch that produced no new result by now is judged on what is there
 
 
 def plan_revert_ci(
@@ -516,17 +517,29 @@ def plan_revert_ci(
         or state.revert_ci_passed is not None
     ):
         return []
-    latest = {r.name: r for r in runs if r.head_sha == state.revert_head and r.conclusion}
-    results = [latest[name].conclusion == "success" for name in dod_items if name in latest]
     rerun_at = state.revert_ci_rerun_at
-    if False in results and rerun_at is not None and now < rerun_at + RERUN_GRACE:
-        return []  # the failure listed may still be the old run, not the one just dispatched
+
+    def counts(run: "CheckRun") -> bool:
+        """After a re-dispatch only a run that finished after it counts: the old failure stays
+        listed until the new run replaces it, and it must not be read as the new result."""
+        if rerun_at is None or now >= rerun_at + RERUN_TIMEOUT:
+            return True
+        if run.completed_at is not None:
+            return run.completed_at > rerun_at
+        return now >= rerun_at + RERUN_GRACE
+
+    latest = {
+        r.name: r for r in runs if r.head_sha == state.revert_head and r.conclusion and counts(r)
+    }
+    results = [latest[name].conclusion == "success" for name in dod_items if name in latest]
     if False in results and state.revert_ci_reruns < REVERT_CI_RERUNS:
         return [Proposed("revert_ci_rerun", {"head": state.revert_head, "at": now})]
     if False in results:
         passed = False
     elif len(results) == len(dod_items):
         passed = True
+    elif rerun_at is not None and now >= rerun_at + RERUN_TIMEOUT:
+        passed = False  # the re-run never finished: freeze rather than wait for ever
     else:
         return []
     return [Proposed("revert_ci", {"head": state.revert_head, "passed": passed})]

@@ -1,9 +1,9 @@
 #!/bin/sh
 # Build the agent image and check what the runner relies on.
-#   ops/agent/build.sh [claude-code-version]      (default: latest; pin it for a real host)
+#   ops/agent/build.sh [claude-code-version]      (default: the version this was tested with)
 set -eu
 cd "$(dirname "$0")"
-VERSION="${1:-latest}"
+VERSION="${1:-2.1.310}"
 IMAGE="${CONCERT_DOCKER_IMAGE:-concert-agent:latest}"
 
 docker build --build-arg "CLAUDE_CODE_VERSION=$VERSION" -t "$IMAGE" .

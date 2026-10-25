@@ -72,7 +72,8 @@ class FakeGitHub:
         self, sha: str, name: str, conclusion: str | None, workflow_hash: str
     ) -> None:
         """Test setup: a CI check run on a commit (conclusion None = still running)."""
-        self.check_runs.append(CheckRun(name, sha, conclusion, workflow_hash))
+        done = self.now if conclusion is not None else None
+        self.check_runs.append(CheckRun(name, sha, conclusion, workflow_hash, done))
 
     def comments_text(self, issue: int) -> str:
         """Test helper: every comment body on an issue, joined."""
@@ -365,7 +366,7 @@ class FakeClient:
         self.fake.dispatched.append(ref)
         head = self.fake.resolve(ref)
         self.fake.check_runs = [
-            CheckRun(r.name, r.head_sha, None, r.workflow_hash) if r.head_sha == head else r
+            CheckRun(r.name, r.head_sha, None, r.workflow_hash, None) if r.head_sha == head else r
             for r in self.fake.check_runs
         ]
 
