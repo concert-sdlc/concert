@@ -1,0 +1,25 @@
+docs/LIVE_VALIDATION.md
+  s_f3f5335312522f::t_892d887ff439e1 1-143
+docs/STATUS.md
+  s_f3f5335312522f::t_727778faf3734e 4-5
+tests/live/conftest.py
+  s_f3f5335312522f::t_c26538ea042407 1-103
+tests/live/test_contract.py
+  s_f3f5335312522f::t_efe489f163530b 1-282
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "163d447a736c8862eec6d58922ec7a86b4064270",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
