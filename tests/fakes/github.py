@@ -74,6 +74,10 @@ class FakeGitHub:
         """Test setup: a CI check run on a commit (conclusion None = still running)."""
         self.check_runs.append(CheckRun(name, sha, conclusion, workflow_hash))
 
+    def comments_text(self, issue: int) -> str:
+        """Test helper: every comment body on an issue, joined."""
+        return "\n".join(c.body for c in self.comments.values() if c.issue == issue)
+
     def add_review(self, pr: int, user_id: int, state: str, commit_id: str) -> None:
         """Test setup: a pull request review."""
         self.reviews.setdefault(pr, []).append(PrReview(user_id, state, commit_id))

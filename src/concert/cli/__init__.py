@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import TextIO
 
+from concert.adopt.adopt import AdoptStop
 from concert.cli.settings import Settings, SettingsError
 from concert.cli.wiring import build_service
 from concert.github.http import GitHubHttp, Transport
@@ -39,6 +40,8 @@ def main(
     args = _parser().parse_args(argv)
     if args.command == "proxy":
         return _proxy(args, err, proxy_runner or _serve_proxy)
+    if args.command == "adopt":
+        return _adopt(args, environment, err, stdout or sys.stdout, transport)
     if args.command == "watchdog":
         return _watchdog(args, environment, err, stdout or sys.stdout, watchdog_runner, clock)
     try:
@@ -123,6 +126,22 @@ def _watchdog(
     return 0
 
 
+def _adopt(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    err: TextIO,
+    out: TextIO,
+    transport: Transport | None,
+) -> int:
+    from concert.cli.adopting import run_adopt
+
+    try:
+        return run_adopt(args, env, out, transport or UrllibTransport(require_https=True))
+    except AdoptStop as stop:
+        print(f"concert: {stop}", file=err)
+        return 2
+
+
 def _split(text: str | None) -> list[str]:
     return [part.strip() for part in (text or "").split(",") if part.strip()]
 
@@ -171,6 +190,18 @@ def _parser() -> argparse.ArgumentParser:
     watchdog.add_argument("--stale-after", type=int, default=30, help="minutes of silence")
     watchdog.add_argument("--runners", default="")
     watchdog.add_argument("--admins", default="")
+    adopt = commands.add_parser(
+        "adopt", help="put an existing organization repository under Concert"
+    )
+    adopt.add_argument("--repo", required=True, help="owner/name")
+    adopt.add_argument("--admin", action="append", required=True, help="GitHub login; repeatable")
+    adopt.add_argument("--approver", action="append", default=[], help="defaults to the admins")
+    adopt.add_argument("--pm-app", required=True, help="slug of the PM App")
+    adopt.add_argument("--worker-app", required=True, help="slug of this runner's Worker App")
+    adopt.add_argument("--runner", required=True, help="this runner's name")
+    adopt.add_argument("--ci", action="append", default=[], metavar="NAME=COMMAND")
+    adopt.add_argument("--staging", default="staging")
+    adopt.add_argument("--protection", choices=["detect", "enforce"], default="detect")
     proxy = commands.add_parser("proxy", help="run the egress proxy for sandboxed agents")
     proxy.add_argument("--listen", default="127.0.0.1:3128")
     proxy.add_argument("--allow", help="comma-separated host names agents may reach over https")

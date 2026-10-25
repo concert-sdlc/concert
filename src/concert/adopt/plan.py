@@ -80,6 +80,7 @@ class InitInputs:
     steering_issue: int
     watchdog_every_hours: int = 2
     watchdog_stale_minutes: int = 30
+    protection: str = "enforce"  # "detect" where no rulesets protect the branches
 
 
 def plan_init(inputs: InitInputs) -> dict[str, str]:
@@ -125,7 +126,7 @@ def _process_yaml(
             "status_field": "Status",
             "steering_issue": inputs.steering_issue,
         },
-        "protection": "enforce",
+        "protection": inputs.protection,
         "humans": {
             "admins": [_person(h) for h in inputs.admins],
             "approvers": [_person(h) for h in inputs.approvers],

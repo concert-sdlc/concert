@@ -125,8 +125,9 @@ by an admin when workflows change (`run_init` has no CLI command yet and was not
 
 ## 3. One agent run
 
-Needs Docker with gVisor (`runsc`), the `concert-agent` image, the egress proxy and
-`ANTHROPIC_API_KEY`. On the runner host (`docs/runner-host.md`), as the `concert` user:
+Needs Docker with gVisor (`runsc`), the `concert-agent` image (`ops/agent/build.sh`, which also
+checks the restrictions the sandbox applies), the egress proxy and the agent credential
+(`ANTHROPIC_API_KEY`, or `CLAUDE_CODE_OAUTH_TOKEN` with `CONCERT_AGENT_AUTH=oauth_token`). On the runner host (`docs/runner-host.md`), as the `concert` user:
 
 ```bash
 uv run concert proxy --listen 172.20.0.1:3128 --allow api.anthropic.com,github.com &
