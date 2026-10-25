@@ -64,6 +64,7 @@ class IssueType(Enum):
     CODE = "code"
     HOTFIX = "hotfix"  # full lifecycle; /dispatch hotfix (admin); never auto-reverted
     REVERT = "revert"  # created by /pm revert; no agent runs
+    DOCS = "docs"  # documentation only: no automated UAT; reclassified to code if the diff is not
 
 
 _S = Status
@@ -161,10 +162,21 @@ _REVERT_TABLE: dict[tuple[Status, Trigger], Status] = {
     **_CLOSE_ROWS,
 }
 
+# A docs issue skips automated UAT: a clean review goes straight to the human gate.
+_DOCS_TABLE: dict[tuple[Status, Trigger], Status] = {
+    **{
+        key: value
+        for key, value in _CODE_TABLE.items()
+        if key[0] is not _S.UAT and key != (_S.IN_REVIEW, _T.CLEAN)
+    },
+    (_S.IN_REVIEW, _T.CLEAN): _S.HUMAN_UAT,
+}
+
 _TABLES: dict[IssueType, dict[tuple[Status, Trigger], Status]] = {
     IssueType.CODE: _CODE_TABLE,
     IssueType.HOTFIX: _HOTFIX_TABLE,
     IssueType.REVERT: _REVERT_TABLE,
+    IssueType.DOCS: _DOCS_TABLE,
 }
 
 

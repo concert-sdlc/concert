@@ -12,6 +12,7 @@ from typing import Any, cast
 import yaml
 
 from concert.core.assign import RunnerInfo
+from concert.core.classify import DEFAULT_DOCS_PATHS
 from concert.core.commands import Role
 from concert.core.derive import DEFAULT_BUDGET
 from concert.core.evidence import GatePolicy
@@ -50,6 +51,14 @@ def load_runner_config(text: str, epoch: int, base_branch: str) -> RunnerConfig:
     refresh = _mapping(doc.get("integration")).get("pregate_refresh", 2)
     if not isinstance(refresh, int) or isinstance(refresh, bool) or refresh < 0:
         raise ConfigError("integration.pregate_refresh must be a non-negative integer")
+    raw_docs: Any = _mapping(_mapping(doc.get("issue_types")).get("docs")).get(
+        "paths", list(DEFAULT_DOCS_PATHS)
+    )
+    if not isinstance(raw_docs, list) or not all(
+        isinstance(p, str) for p in cast("list[Any]", raw_docs)
+    ):
+        raise ConfigError("issue_types.docs.paths must be a list of globs")
+    docs = [str(p) for p in cast("list[Any]", raw_docs)]
     admins = {u for u, role in roles.items() if role is Role.ADMIN}
     approvers = {u for u, role in roles.items() if role >= Role.APPROVER}
     policy = GatePolicy(
@@ -85,6 +94,7 @@ def load_runner_config(text: str, epoch: int, base_branch: str) -> RunnerConfig:
         on_failure=str(on_failure),
         verify_reruns=int(verify.get("rerun_on_failure", 1)),
         pregate_refresh=refresh,
+        docs_paths=tuple(docs),
     )
 
 

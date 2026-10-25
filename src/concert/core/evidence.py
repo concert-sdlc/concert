@@ -76,7 +76,8 @@ def evaluate_gate(
             record(
                 f"review:{reviewer}", _result(latest.get(("review", reviewer)), head_sha, policy)
             )
-        record("uat", _result(latest.get(("uat", None)), head_sha, policy))
+        if policy.issue_type is not IssueType.DOCS:  # docs skip automated UAT
+            record("uat", _result(latest.get(("uat", None)), head_sha, policy))
 
     is_revert = policy.issue_type is IssueType.REVERT
     required: list[tuple[str, str, frozenset[int]]] = [

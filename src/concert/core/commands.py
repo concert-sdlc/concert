@@ -92,11 +92,9 @@ def parse_command(body: str) -> Command | None:
     if verb not in _VERBS:
         return None
     if verb == "dispatch":
-        return (
-            Command("dispatch", "hotfix", "")
-            if rest == "hotfix"
-            else Command("dispatch", None, rest)
-        )
+        if rest in ("hotfix", "docs"):
+            return Command("dispatch", rest, "")
+        return Command("dispatch", None, rest)
     if verb in ("approve", "reject"):
         kind, _, arg = rest.partition(" ")
         return Command(verb, kind or None, arg.strip())
@@ -179,7 +177,7 @@ def _rule(command: Command) -> _Rule | None:
     if verb == "dispatch":
         if kind == "hotfix":
             return _Rule(Role.ADMIN, _no_argument, frozenset({_S.INBOX}))
-        if kind is None:
+        if kind in (None, "docs"):
             return _Rule(Role.APPROVER, _no_argument, frozenset({_S.INBOX}))
     if verb == "approve":
         if kind == "spec":

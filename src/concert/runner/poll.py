@@ -15,6 +15,7 @@ from typing import Protocol, cast
 
 from concert.core.assign import Heartbeat, RunnerInfo, expire_leases, plan_assignments
 from concert.core.ci import plan_ci_evidence, plan_review_evidence
+from concert.core.classify import docs_violations
 from concert.core.commands import (
     Command,
     IssueContext,
@@ -103,6 +104,7 @@ class RunnerConfig:
     on_failure: str = "freeze"  # staging verification: "freeze" or "auto_revert"
     verify_reruns: int = 1  # automatic re-runs of a failed verification (flaky tests)
     pregate_refresh: int = 2  # rebases onto a moved staging before the human UAT kit, at most
+    docs_paths: Sequence[str] = ("docs/**", "*.md")  # a docs issue may change only these
 
 
 class FactsProvider(Protocol):
@@ -222,6 +224,7 @@ class _Poll:
         self._create_branch()
         if self._check_branch():
             return self._finish()
+        self._classify()
         self._intake()
         self._create_branch()  # intake may have moved the issue into spec
         self._evidence()
@@ -707,6 +710,35 @@ class _Poll:
             security_sensitive=policy.security_sensitive if policy else False,
             protected_files=[p for p in touched if matches_any(p, self.config.protected_paths)],
         )
+
+    def _classify(self) -> bool:
+        """A docs issue keeps its lighter gates only while its diff is documentation; the check is
+        made on every poll, so no later push can slip code through as docs."""
+        state = self.state
+        if state.issue_type is not IssueType.DOCS or state.head_sha is None:
+            return False
+        offending = docs_violations(
+            self._changed_paths(), self.config.docs_paths, self.config.protected_paths
+        )
+        if not offending:
+            return False
+        shown = ", ".join(offending[:5])
+        self._post(
+            [
+                Proposed(
+                    "reclassified",
+                    {
+                        "from": "docs",
+                        "to": "code",
+                        "reason": f"changes outside documentation: {shown}",
+                    },
+                )
+            ]
+        )
+        if self.state.status in (Status.HUMAN_UAT, Status.INTEGRATING):
+            # automated UAT never ran for it: an admin decides where it goes next
+            return self._block(f"reclassified to a code issue after review: {shown}")
+        return False
 
     def _staging_moved(self) -> bool:
         """Does the base branch have commits the issue's branch lacks?"""

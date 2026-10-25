@@ -344,6 +344,15 @@ def _apply(state: IssueState, event: Event) -> IssueState:
         if state.status is not Status.INBOX:
             raise _Conflict(f"conflict at seq {event.seq}: an issue is typed only in the inbox")
         return replace(state, issue_type=IssueType(event.data["issue_type"]))
+    if kind == "reclassified":
+        if (
+            state.issue_type is not IssueType.DOCS
+            or IssueType(event.data["to"]) is not IssueType.CODE
+        ):
+            raise _Conflict(f"conflict at seq {event.seq}: only a docs issue becomes a code issue")
+        return replace(
+            state, issue_type=IssueType.CODE, note=str(event.data.get("reason", "")) or None
+        )
     if kind == "dependency_added":
         added = Dependency(int(event.data["issue"]), str(event.data["kind"]))
         kept = tuple(d for d in state.dependencies if d.issue != added.issue)

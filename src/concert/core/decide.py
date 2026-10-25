@@ -337,11 +337,15 @@ def _from_commands(state: IssueState, commands: Sequence[ValidCommand]) -> list[
         if (
             state.status is Status.INBOX
             and item.command.verb == "dispatch"
-            and item.command.kind == "hotfix"
-        ):  # an admin's hotfix: the type changes first, then the normal dispatch
-            typed = Proposed("issue_typed", {"issue_type": IssueType.HOTFIX.value})
-            hotfix = replace(state, issue_type=IssueType.HOTFIX)
-            return [passage, typed, *_trigger_events(hotfix, Trigger.DISPATCH)]
+            and item.command.kind in ("hotfix", "docs")
+        ):  # the type changes first, then the normal dispatch
+            chosen = IssueType(item.command.kind)
+            typed = Proposed("issue_typed", {"issue_type": chosen.value})
+            return [
+                passage,
+                typed,
+                *_trigger_events(replace(state, issue_type=chosen), Trigger.DISPATCH),
+            ]
         if item.command.verb == "lesson":
             note = {"text": item.command.arg.strip(), "author_id": item.actor.user_id}
             return [passage, Proposed("lesson_proposed", note | {"source": "human"})]
@@ -351,7 +355,9 @@ def _from_commands(state: IssueState, commands: Sequence[ValidCommand]) -> list[
             if state.head_sha is None:
                 continue
             return [passage, _approval_evidence(item, state.head_sha)]
-        key = (state.status, state.issue_type, item.command.verb, item.command.kind)
+        # a docs issue passes the same human gates as a code issue
+        gate_type = IssueType.CODE if state.issue_type is IssueType.DOCS else state.issue_type
+        key = (state.status, gate_type, item.command.verb, item.command.kind)
         trigger = _GATES.get(key)
         if trigger is not None:
             return [passage, *_trigger_events(state, trigger)]
