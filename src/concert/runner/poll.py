@@ -670,9 +670,8 @@ class _Poll:
         )
 
     def _open_revert(self, number: int) -> dict[str, int | str | None]:
-        branch = f"revert-pr-{number}"
         try:
-            pr = self.github.find_pr(branch) or self.github.revert_pr(number)
+            pr = self.github.find_revert(number) or self.github.revert_pr(number)
         except Conflict as error:
             return {"error": str(error)}
         return {"number": pr.number, "branch": pr.head, "sha": self.github.get_ref(pr.head)}

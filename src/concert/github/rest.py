@@ -10,7 +10,8 @@ go through GraphQL.
 import base64
 import hashlib
 import re
-from collections.abc import Iterator, Mapping, Sequence
+import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, cast
@@ -18,6 +19,7 @@ from typing import Any, cast
 from concert.core.ci import CheckRun, PrReview
 from concert.core.commit_binding import CommitMeta
 from concert.github.api import (
+    BinaryBlob,
     Comment,
     Conflict,
     GitHubError,
@@ -31,6 +33,8 @@ from concert.github.http import GitHubHttp
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 Json = dict[str, Any]
+# Seconds to wait between merge attempts while GitHub catches up after a push (about 30 in all).
+_MERGE_SETTLE = (1.0, 2.0, 4.0, 8.0, 15.0)
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,7 @@ class RestGitHub:
     owner: str
     repo: str
     board: ProjectBoard | None = None
+    sleep: Callable[[float], None] = time.sleep
     _project: Json = field(default_factory=dict[str, Any])
     _workflow_hashes: dict[tuple[str, str], str] = field(default_factory=dict[tuple[str, str], str])
 
@@ -90,8 +95,22 @@ class RestGitHub:
         return _issue(self.http.json("GET", self._repo(f"/issues/{number}")))
 
     def list_open_issues(self) -> Sequence[int]:
-        pages = self.http.paged(self._repo("/issues"), {"state": "open", "per_page": 100})
-        return sorted(int(raw["number"]) for raw in pages if "pull_request" not in raw)
+        # GraphQL, not REST /issues: live, REST omitted a new issue for ~2 s and kept listing a
+        # closed one, while GraphQL reflected both writes at once. It never returns pull requests.
+        numbers: list[int] = []
+        cursor: str | None = None
+        while True:
+            data = self.http.graphql(
+                "query($o:String!,$r:String!,$after:String){repository(owner:$o,name:$r)"
+                "{issues(states:OPEN,first:100,after:$after){nodes{number} "
+                "pageInfo{hasNextPage endCursor}}}}",
+                {"o": self.owner, "r": self.repo, "after": cursor},
+            )
+            page = data["repository"]["issues"]
+            numbers.extend(int(n["number"]) for n in page["nodes"])
+            if not page["pageInfo"]["hasNextPage"]:
+                return sorted(numbers)
+            cursor = str(page["pageInfo"]["endCursor"])
 
     def close_issue(self, number: int) -> Issue:
         return _issue(
@@ -141,10 +160,10 @@ class RestGitHub:
         board = self._resolved_board()
         node = self._issue_node(issue)
         data = self.http.graphql(
-            "query($n:ID!){node(id:$n){... on Issue{projectItems(first:20){nodes{id project{id} "
-            'fieldValueByName(name:"' + board["field_name"] + '"){... on '
+            "query($n:ID!,$f:String!){node(id:$n){... on Issue{projectItems(first:20){nodes{id "
+            "project{id} fieldValueByName(name:$f){... on "
             "ProjectV2ItemFieldSingleSelectValue{name}}}}}}}",
-            {"n": node},
+            {"n": node, "f": board["field_name"]},
         )
         for item in _nodes(data, "node", "projectItems"):
             if item["project"]["id"] == board["id"] and item.get("fieldValueByName"):
@@ -180,7 +199,7 @@ class RestGitHub:
         kind = "organization" if self.board.is_org else "user"
         data = self.http.graphql(
             f"query($o:String!,$n:Int!,$f:String!){{{kind}(login:$o){{projectV2(number:$n){{id "
-            "field(name:$f){... on ProjectV2SingleSelectField{id options{id name}}}}}}}",
+            "field(name:$f){... on ProjectV2SingleSelectField{id options{id name}}}}}}",
             {"o": self.board.owner, "n": self.board.number, "f": self.board.field_name},
         )
         project = data[kind]["projectV2"]
@@ -256,15 +275,17 @@ class RestGitHub:
     ) -> str:
         head = self._sha_of(branch)
         base_tree = self.http.json("GET", self._repo(f"/git/commits/{head}"))["tree"]["sha"]
-        entries: list[Json] = [
-            {
-                "path": path,
-                "mode": "100644",
-                "type": "blob",
-                **({"content": c} if c is not None else {"sha": None}),
-            }
-            for path, c in changes.items()
-        ]
+        modes = self._modes(str(base_tree))
+        entries: list[Json] = []
+        for path, content in changes.items():
+            entry: Json = {"path": path, "mode": modes.get(path, "100644"), "type": "blob"}
+            if content is None:
+                entry["sha"] = None
+            elif isinstance(content, BinaryBlob):
+                entry["sha"] = content.sha  # reuse the blob: the bytes were never decoded
+            else:
+                entry["content"] = content
+            entries.append(entry)
         tree = self.http.json(
             "POST", self._repo("/git/trees"), {"base_tree": base_tree, "tree": entries}
         )
@@ -281,6 +302,16 @@ class RestGitHub:
         )
         self.update_ref(branch, str(created["sha"]))
         return str(created["sha"])
+
+    def _modes(self, tree: str) -> dict[str, str]:
+        """File modes in the base tree, so editing an executable script keeps it executable."""
+        try:
+            raw = self.http.json("GET", self._repo(f"/git/trees/{tree}"), None, {"recursive": 1})
+        except NotFound:
+            return {}
+        return {
+            str(e["path"]): str(e["mode"]) for e in raw.get("tree", []) if e.get("type") == "blob"
+        }
 
     def list_commits(self, base: str, head: str) -> Sequence[CommitMeta]:
         pages = self.http.paged(self._repo(f"/compare/{base}...{head}"), {"per_page": 100})
@@ -308,7 +339,10 @@ class RestGitHub:
 
     def _blob(self, sha: str) -> str:
         raw = self.http.json("GET", self._repo(f"/git/blobs/{sha}"))
-        return base64.b64decode(raw["content"]).decode("utf-8")
+        try:
+            return base64.b64decode(raw["content"]).decode("utf-8")
+        except UnicodeDecodeError:
+            return BinaryBlob(sha)
 
     def read_file(self, ref: str, path: str) -> str | None:
         try:
@@ -319,8 +353,15 @@ class RestGitHub:
             return None
         content = cast("Json", raw)
         if content.get("encoding") != "base64":
-            return None
-        return base64.b64decode(content["content"]).decode("utf-8")
+            # Over 1 MB the contents API sends no content at all: read the blob instead, never
+            # report the file as empty (the event mirror would overwrite its own history).
+            if not content.get("sha"):
+                return None
+            return self._blob(str(content["sha"]))
+        try:
+            return base64.b64decode(content["content"]).decode("utf-8")
+        except UnicodeDecodeError:
+            return BinaryBlob(str(content["sha"]))
 
     def commit_parents(self, sha: str) -> tuple[str, ...]:
         raw = self.http.json("GET", self._repo(f"/git/commits/{self._sha_of(sha)}"))
@@ -381,6 +422,13 @@ class RestGitHub:
         )
         return _pr(raw[0]) if raw else None
 
+    def find_revert(self, number: int) -> PullRequest | None:
+        # GitHub names the branch revert-<number>-<head branch of the reverted PR>
+        pages = self.http.paged(self._repo("/pulls"), {"state": "open", "per_page": 100})
+        prefix = f"revert-{number}-"
+        found = next((raw for raw in pages if str(raw["head"]["ref"]).startswith(prefix)), None)
+        return _pr(found) if found else None
+
     def mark_ready(self, number: int) -> PullRequest:
         node = self.http.json("GET", self._repo(f"/pulls/{number}"))["node_id"]
         self.http.graphql(
@@ -399,21 +447,37 @@ class RestGitHub:
         return self.get_pr(number)
 
     def merge_pr(self, number: int, expected_head: str) -> str:
-        try:
-            raw = self.http.json(
-                "PUT",
-                self._repo(f"/pulls/{number}/merge"),
-                {"sha": expected_head, "merge_method": "merge"},
-            )
-        except Conflict as error:
-            if "modified" in str(error).lower():
-                raise StaleHead(str(error)) from error
-            raise
-        except GitHubError as error:
-            if str(error).startswith("405"):
-                raise Conflict(str(error)) from error
-            raise
-        return str(raw["sha"])
+        for delay in (*_MERGE_SETTLE, None):
+            try:
+                raw = self.http.json(
+                    "PUT",
+                    self._repo(f"/pulls/{number}/merge"),
+                    {"sha": expected_head, "merge_method": "merge"},
+                )
+            except Conflict as error:
+                text = str(error).lower()
+                if "modified" in text:
+                    raise StaleHead(str(error)) from error
+                if "out of date" in text:  # also GitHub's wording for "needs updating"
+                    pr = self.http.json("GET", self._repo(f"/pulls/{number}"))
+                    if str(pr["head"]["sha"]) != expected_head:
+                        raise StaleHead(str(error)) from error
+                raise
+            except GitHubError as error:
+                if not str(error).startswith("405"):
+                    raise
+                # Live: right after a push the PR still shows the old head and `mergeable` is
+                # null, and the merge answers 405 even for the right sha. Wait for it to settle.
+                pr = self.http.json("GET", self._repo(f"/pulls/{number}"))
+                at_head = str(pr["head"]["sha"]) == expected_head
+                if (at_head and pr.get("mergeable") is not None) or delay is None:
+                    if not at_head:
+                        raise StaleHead(str(error)) from error
+                    raise Conflict(str(error)) from error
+                self.sleep(delay)
+            else:
+                return str(raw["sha"])
+        raise AssertionError("unreachable")  # pragma: no cover
 
     def revert_pr(self, number: int) -> PullRequest:
         pr = self.http.json("GET", self._repo(f"/pulls/{number}"))

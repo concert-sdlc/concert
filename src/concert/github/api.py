@@ -7,7 +7,7 @@ implement `GitHubApi`.
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Self
 
 from concert.core.ci import CheckRun, PrReview
 from concert.core.commit_binding import CommitMeta
@@ -31,6 +31,22 @@ class Conflict(GitHubError):
 
 class StaleHead(Conflict):
     """A merge named an expected head that is no longer the PR head."""
+
+
+class BinaryBlob(str):
+    """Stands in for a file that is not UTF-8 text.
+
+    It compares equal exactly when the blob is the same, and a commit that includes it reuses the
+    blob by id, so a repository with an image in it can be read, compared and committed on
+    without ever decoding the bytes. Agents are never given one (they work on text only).
+    """
+
+    sha: str
+
+    def __new__(cls, sha: str) -> Self:
+        blob = super().__new__(cls, f"\0binary-blob:{sha}")
+        blob.sha = sha
+        return blob
 
 
 @dataclass(frozen=True)
@@ -113,6 +129,7 @@ class GitHubApi(Protocol):
     def get_pr(self, number: int) -> PullRequest: ...
     def list_pr_reviews(self, number: int) -> Sequence[PrReview]: ...
     def find_pr(self, head: str) -> PullRequest | None: ...  # the open PR for a head branch
+    def find_revert(self, number: int) -> PullRequest | None: ...  # the open PR reverting PR number
     def mark_ready(self, number: int) -> PullRequest: ...
     def mark_draft(self, number: int) -> PullRequest: ...
     def revert_pr(self, number: int) -> PullRequest: ...  # a ready PR that undoes a merged one

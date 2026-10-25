@@ -1,5 +1,7 @@
 """Repository facts for handoff acceptance, read through the GitHub interface."""
 
+from collections.abc import Mapping
+
 from concert.core.derive import IssueState
 from concert.core.handoff import Handoff, RunFacts
 from concert.core.spec_hash import spec_tree_hash
@@ -30,7 +32,8 @@ class GitFacts:
                     break
             if not exists and sha == run_start_head:
                 exists = True  # a run that made no commits reports the head it started from
-        tree = dict(self._github.read_tree(sha)) if exists and sha is not None else {}
+        # not dict(): a real tree loads a file only when asked, and only the spec files are needed
+        tree: Mapping[str, str] = self._github.read_tree(sha) if exists and sha is not None else {}
         return RunFacts(
             run_start_head=run_start_head,
             approved_spec_rev=state.approved_spec_rev,

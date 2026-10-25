@@ -39,7 +39,11 @@ class Api:
     def send(self, method: str, url: str, headers: dict[str, str], body: bytes | None) -> Response:
         path, _, query = url.removeprefix("https://api.github.com").partition("?")
         params = dict(p.split("=", 1) for p in query.split("&") if p)
-        payload = json.loads(body) if body else None
+        payload: Any = json.loads(body) if body else None
+        if path == "/graphql":  # the real parser rejects these; a scripted API must too
+            text = str(payload["query"])
+            assert text.count("{") == text.count("}"), f"unbalanced braces in {text!r}"
+            assert text.count("(") == text.count(")"), f"unbalanced parens in {text!r}"
         self.requests.append((method, path + (f"?{query}" if query else ""), payload))
         for verb, pattern, handler in self.routes:
             found = pattern.match(path)
@@ -49,9 +53,12 @@ class Api:
         return Response(404, {}, b'{"message": "Not Found"}')
 
 
-def client(api: Api, board: ProjectBoard | None = None) -> RestGitHub:
+def client(
+    api: Api, board: ProjectBoard | None = None, sleeps: list[float] | None = None
+) -> RestGitHub:
     http = GitHubHttp(api, token=lambda: "t", sleep=lambda _s: None, max_attempts=1)
-    return RestGitHub(http, "acme", "app", board)
+    waits = sleeps if sleeps is not None else []
+    return RestGitHub(http, "acme", "app", board, sleep=waits.append)
 
 
 USER = {"id": 7, "login": "alice", "type": "User"}
@@ -372,14 +379,14 @@ def test_parents_of_a_commit() -> None:
 # --- pull requests ----------------------------------------------------------------------------------
 
 
-def pr_json(number: int = 5, **extra: Any) -> dict[str, Any]:
+def pr_json(number: int = 5, head_sha: str = SHA, **extra: Any) -> dict[str, Any]:
     return {
         "number": number,
         "title": "t",
         "state": "open",
         "draft": True,
         "node_id": "PR_1",
-        "head": {"ref": "pm/3"},
+        "head": {"ref": "pm/3", "sha": head_sha},
         "base": {"ref": "staging"},
     } | extra
 
@@ -454,8 +461,10 @@ def test_a_moved_head_is_a_stale_head_and_other_refusals_are_conflicts() -> None
     other.on(
         "PUT", "/repos/acme/app/pulls/5/merge", (405, {"message": "Pull Request is not mergeable"})
     )
-    with pytest.raises(Conflict):
+    other.on("GET", "/repos/acme/app/pulls/5", (200, pr_json(mergeable=False, head_sha=SHA)))
+    with pytest.raises(Conflict) as refused:
         client(other).merge_pr(5, SHA)
+    assert not isinstance(refused.value, StaleHead)
     broken = Api()
     broken.on("PUT", "/repos/acme/app/pulls/5/merge", (500, {"message": "boom"}))
     with pytest.raises(GitHubError) as failed:
@@ -466,6 +475,59 @@ def test_a_moved_head_is_a_stale_head_and_other_refusals_are_conflicts() -> None
     with pytest.raises(Conflict) as caught:
         client(forbidden).merge_pr(5, SHA)
     assert not isinstance(caught.value, StaleHead)
+
+
+def test_head_branch_is_out_of_date_is_stale_only_when_the_pr_head_moved() -> None:
+    """Live: a second wording for a moved head. It also means "needs updating", so check."""
+    message = {"message": "Head branch is out of date. Review and try the merge again."}
+    moved = Api()
+    moved.on("PUT", "/repos/acme/app/pulls/5/merge", (409, message))
+    moved.on("GET", "/repos/acme/app/pulls/5", (200, pr_json(head_sha=SHA2)))
+    with pytest.raises(StaleHead):
+        client(moved).merge_pr(5, SHA)
+    behind = Api()
+    behind.on("PUT", "/repos/acme/app/pulls/5/merge", (409, message))
+    behind.on("GET", "/repos/acme/app/pulls/5", (200, pr_json(head_sha=SHA)))
+    with pytest.raises(Conflict) as caught:
+        client(behind).merge_pr(5, SHA)
+    assert not isinstance(caught.value, StaleHead)
+
+
+def test_a_405_right_after_a_push_is_retried_until_github_settles() -> None:
+    """Live: just after a push the PR head still shows the old commit and mergeable is null; the
+    merge answers 405 even for the right sha."""
+    api = Api()
+    answers = iter(
+        [(405, {"message": "Pull Request is not mergeable"})] * 2 + [(200, {"sha": SHA2})]
+    )
+    api.on("PUT", "/repos/acme/app/pulls/5/merge", lambda _m, _q, _b: next(answers))
+    api.on("GET", "/repos/acme/app/pulls/5", (200, pr_json(mergeable=None, head_sha=SHA)))
+    waits: list[float] = []
+    assert client(api, sleeps=waits).merge_pr(5, SHA) == SHA2
+    assert len(waits) == 2
+
+
+def test_a_405_that_never_settles_with_the_expected_head_is_a_conflict() -> None:
+    api = Api()
+    api.on(
+        "PUT", "/repos/acme/app/pulls/5/merge", (405, {"message": "Pull Request is not mergeable"})
+    )
+    api.on("GET", "/repos/acme/app/pulls/5", (200, pr_json(mergeable=None, head_sha=SHA)))
+    waits: list[float] = []
+    with pytest.raises(Conflict) as caught:
+        client(api, sleeps=waits).merge_pr(5, SHA)
+    assert not isinstance(caught.value, StaleHead)
+    assert 1 <= len(waits) <= 6 and sum(waits) <= 40
+
+
+def test_a_405_whose_pr_head_stays_elsewhere_is_a_stale_head() -> None:
+    api = Api()
+    api.on(
+        "PUT", "/repos/acme/app/pulls/5/merge", (405, {"message": "Pull Request is not mergeable"})
+    )
+    api.on("GET", "/repos/acme/app/pulls/5", (200, pr_json(mergeable=True, head_sha=SHA2)))
+    with pytest.raises(StaleHead):
+        client(api, sleeps=[]).merge_pr(5, SHA)
 
 
 def test_reverting_a_merged_pr_goes_through_graphql_and_returns_the_new_pr() -> None:
@@ -606,15 +668,25 @@ def test_missing_things_raise_not_found() -> None:
         client(Api()).get_issue(1)
 
 
-def test_open_issues_exclude_pull_requests() -> None:
+def test_open_issues_come_from_graphql_because_the_rest_list_lags_writes() -> None:
+    """Live: REST /issues omitted a new issue for ~2 s and kept listing a closed one."""
     api = Api()
-    api.on(
-        "GET",
-        "/repos/acme/app/issues",
-        (200, [issue_json(3), issue_json(5, pull_request={}), issue_json(2)]),
-    )
-    assert client(api).list_open_issues() == [2, 3]
-    assert api.requests[0][1].startswith("/repos/acme/app/issues?state=open")
+    pages = {
+        None: {
+            "nodes": [{"number": 3}, {"number": 2}],
+            "pageInfo": {"hasNextPage": True, "endCursor": "c1"},
+        },
+        "c1": {"nodes": [{"number": 7}], "pageInfo": {"hasNextPage": False, "endCursor": None}},
+    }
+
+    def handler(_m: re.Match[str], _q: dict[str, str], body: Any) -> tuple[int, Any]:
+        assert "issues(states:OPEN" in body["query"]
+        page = pages[body["variables"].get("after")]
+        return 200, {"data": {"repository": {"issues": page}}}
+
+    api.on("POST", "/graphql", handler)
+    assert client(api).list_open_issues() == [2, 3, 7]
+    assert not [r for r in api.requests if r[1].startswith("/repos/acme/app/issues")]
 
 
 def test_an_orphan_branch_is_a_parentless_commit_and_a_ref() -> None:

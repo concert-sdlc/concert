@@ -136,10 +136,16 @@ def test_pagination_follows_the_next_link() -> None:
     assert transport.calls[1][1] == "https://api.github.com/x?page=2"
 
 
-def test_pagination_stops_at_the_page_limit() -> None:
+def test_pagination_past_the_page_limit_is_an_error_not_a_partial_list() -> None:
     loop = ok([1], headers={"Link": '<https://api.github.com/x?page=2>; rel="next"'})
     transport = Script(*([loop] * 5))
-    assert http(transport).paged("/x", max_pages=3) == [1, 1, 1]
+    with pytest.raises(GitHubError, match="more than 3 pages"):
+        http(transport).paged("/x", max_pages=3)
+    assert len(transport.calls) == 3
+    last = Script(
+        ok([1], headers={"Link": '<https://api.github.com/x?page=2>; rel="next"'}), ok([2])
+    )
+    assert http(last).paged("/x", max_pages=2) == [1, 2]  # exactly the limit is fine
 
 
 def test_graphql_returns_data_and_raises_on_errors() -> None:

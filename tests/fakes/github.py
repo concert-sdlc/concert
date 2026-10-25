@@ -139,10 +139,14 @@ class FakeClient:
         return issue
 
     def get_issue(self, number: int) -> Issue:
-        try:
+        if number in self.fake.issues:
             return self.fake.issues[number]
-        except KeyError:
-            raise NotFound(f"no issue #{number}") from None
+        if number in self.fake.prs:  # GitHub's /issues/{n} answers for pull requests too
+            pr = self.fake.prs[number].pr
+            return Issue(
+                number, pr.title, "", self.actor, "open" if pr.state == "open" else "closed"
+            )
+        raise NotFound(f"no issue #{number}")
 
     def list_open_issues(self) -> Sequence[int]:
         return sorted(n for n, i in self.fake.issues.items() if i.state == "open")
@@ -314,7 +318,7 @@ class FakeClient:
                 tree[path] = before[path]
             else:
                 tree.pop(path, None)
-        branch = f"revert-pr-{number}"
+        branch = f"revert-{number}-{record.pr.head}"  # GitHub's name for the branch
         self.create_branch(branch, base)
         self.fake.new_commit(
             branch,
@@ -337,6 +341,17 @@ class FakeClient:
     def find_pr(self, head: str) -> PullRequest | None:
         return next(
             (r.pr for r in self.fake.prs.values() if r.pr.head == head and r.pr.state == "open"),
+            None,
+        )
+
+    def find_revert(self, number: int) -> PullRequest | None:
+        prefix = f"revert-{number}-"
+        return next(
+            (
+                r.pr
+                for r in self.fake.prs.values()
+                if r.pr.head.startswith(prefix) and r.pr.state == "open"
+            ),
             None,
         )
 

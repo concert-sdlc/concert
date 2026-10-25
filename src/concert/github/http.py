@@ -18,6 +18,7 @@ from concert.github.api import Conflict, Forbidden, GitHubError, NotFound
 
 API = "https://api.github.com"
 _MAX_WAIT = 120  # a longer rate-limit wait is reported to the caller instead of slept
+_SAFE_METHODS = frozenset({"GET", "HEAD"})
 _NEXT = re.compile(r'<([^>]+)>;\s*rel="next"')
 
 
@@ -73,12 +74,14 @@ class GitHubHttp:
         items: list[Any] = []
         for _ in range(max_pages):
             if url is None:
-                break
+                return items
             response = self._send("GET", url, None)
             page: Any = self._parse(response)
             items.extend(cast("list[Any]", page) if isinstance(page, list) else [page])
             found = _NEXT.search(response.headers.get("Link", ""))
             url = found.group(1) if found else None
+        if url is not None:  # a partial list would be read as the whole truth
+            raise GitHubError(f"{path} has more than {max_pages} pages")
         return items
 
     def graphql(self, query: str, variables: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -109,18 +112,22 @@ class GitHubHttp:
             headers["Content-Type"] = "application/json"
         for attempt in range(1, self._max_attempts + 1):
             response = self._transport.send(method, url, headers, data)
-            wait = self._wait_for(response)
+            wait = self._wait_for(response, method)
             last = attempt == self._max_attempts
             if wait is None or last:
                 return response
             self._sleep(wait if wait > 0 else float(2 ** (attempt - 1)))
         raise AssertionError("unreachable")  # pragma: no cover
 
-    def _wait_for(self, response: Response) -> float | None:
-        """Seconds to wait before retrying this response, 0 for plain backoff, None: don't retry."""
+    def _wait_for(self, response: Response, method: str) -> float | None:
+        """Seconds to wait before retrying this response, 0 for plain backoff, None: don't retry.
+
+        A server error is retried only for reads: a write that got a 502 may have been applied
+        (a merge, a comment), and sending it again would duplicate or misreport it. The caller's
+        intent/outcome record reconciles a failed write on the next poll instead."""
         status = response.status
         if status in (500, 502, 503, 504):
-            return 0
+            return 0 if method in _SAFE_METHODS else None
         limited = status == 429 or (status == 403 and _is_rate_limit(response))
         if not limited:
             return None

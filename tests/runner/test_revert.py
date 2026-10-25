@@ -23,7 +23,7 @@ def failed_world(**config: Any) -> tuple[World, int, str]:
 
 
 def revert_prs(world: World) -> list[Any]:
-    return [r.pr for r in world.fake.prs.values() if r.pr.head.startswith("revert-pr-")]
+    return [r.pr for r in world.fake.prs.values() if r.pr.head.startswith("revert-")]
 
 
 def test_a_final_failure_opens_a_revert_pr_and_waits_for_its_checks() -> None:
@@ -134,15 +134,15 @@ def test_a_look_alike_revert_pr_with_extra_changes_is_never_merged() -> None:
     original = world.state(issue).pr_number
     # someone with write access pre-creates the branch the PM would adopt, adding a backdoor
     gh = world.fake.client(world.pm_identity)
-    gh.create_branch(f"revert-pr-{original}", "staging")
+    gh.create_branch(f"revert-{original}-look-alike", "staging")
     gh.commit(
-        f"revert-pr-{original}",
+        f"revert-{original}-look-alike",
         "looks like a revert",
         {"backend/export.py": None, "backend/backdoor.py": "evil()"},
         author="x",
         committer="x",
     )
-    gh.create_pr(f"revert-pr-{original}", "staging", "Revert")
+    gh.create_pr(f"revert-{original}-look-alike", "staging", "Revert")
     world.poll(issue)
     world.fake.add_check_run(world.state(issue).revert_head or "", "tests", "success", "w1")
     before = world.pm.get_ref("staging")
