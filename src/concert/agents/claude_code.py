@@ -8,15 +8,18 @@ the worker posts nothing, so the lease expires and the PM retries on its infra-r
 """
 
 import json
+import re
 import secrets
 import shutil
 import tempfile
+import time
+from collections.abc import Callable
 from importlib import resources
 from pathlib import Path
 from typing import Any, cast
 
 from concert.core.handoff import RunState, allowed_exits
-from concert.runner.worker import AgentFailure, AgentResult, AgentTask
+from concert.runner.worker import AgentFailure, AgentResult, AgentTask, QuotaPause
 from concert.sandbox.executor import Executor
 from concert.sandbox.workspace import UnsafeWorkspace, changes_since, materialize, result_path
 
@@ -31,7 +34,9 @@ class ClaudeCodeAgent:
         model: str,
         timeout: float,
         max_budget_usd: float | None = None,
+        clock: Callable[[], float] = time.time,
     ) -> None:
+        self._clock = clock
         self.executor = executor
         self.model = model
         self.timeout = timeout
@@ -65,6 +70,9 @@ class ClaudeCodeAgent:
         if done.timed_out:
             raise AgentFailure("the run timed out")
         if done.exit_code != 0:
+            limit = _quota_pause(done.stdout, done.stderr, int(self._clock()))
+            if limit is not None:
+                raise limit
             raise AgentFailure(f"claude exited with {done.exit_code}: {done.stderr[-500:]}")
         report = _read_result(workdir, RunState(task.state))
         try:
@@ -80,6 +88,33 @@ class ClaudeCodeAgent:
             decisions=_strings(report, "decisions"),
             doubts=_strings(report, "doubts"),
         )
+
+
+_RESET = re.compile(r"limit reached\|(\d{9,11})")
+_HTTP_429 = re.compile(r"(?:api error|status|http|error)[: ]+429\b", re.IGNORECASE)
+_LIMITS = (
+    "usage limit",
+    "rate limit",
+    "rate_limit",
+    "too many requests",
+    "credit balance is too low",
+    "5-hour limit",
+    "weekly limit",
+)
+
+
+def _quota_pause(stdout: str, stderr: str, now: int) -> QuotaPause | None:
+    """Recognise a usage or rate limit in what the CLI printed. The subscription message carries
+    the reset time as `...limit reached|<epoch>`; other limits give none."""
+    text = f"{stdout}\n{stderr}"
+    reset = _RESET.search(text)
+    if reset is not None:
+        until = int(reset.group(1))
+        return QuotaPause("usage limit reached", until if until > now else None)
+    lowered = text.lower()
+    if any(marker in lowered for marker in _LIMITS) or _HTTP_429.search(text):
+        return QuotaPause("rate or usage limit")
+    return None
 
 
 def build_prompt(task: AgentTask) -> str:

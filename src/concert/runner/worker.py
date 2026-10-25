@@ -24,6 +24,9 @@ from concert.github.heartbeats import write_heartbeat
 
 _COMMITTING = frozenset({RunState.SPEC, RunState.IMPLEMENTING, RunState.INTEGRATING})
 MAX_COMMENT = 60_000  # GitHub refuses a comment over 65,536 characters
+PAUSE_DEFAULT = 900  # seconds to wait when the limit names no reset time
+MAX_PAUSES = 24  # pauses per run; past it the run is left to lapse and be charged like a failure
+PAUSE_BUDGET = 6 * 3600  # a reset further away than this is not waited for: the PM reassigns
 _ITEM = 1_000  # one decision, doubt or path in a handoff
 _LIST = 8_000  # all the items of one list
 
@@ -52,6 +55,15 @@ class AgentResult:
     doubts: tuple[str, ...] = ()
 
 
+class QuotaPause(Exception):
+    """The agent hit a usage or rate limit. This is a pause, not a failure: the run stays in the
+    heartbeat (so its lease holds and no retry is charged) and is tried again after `until`."""
+
+    def __init__(self, reason: str, until: int | None = None) -> None:
+        super().__init__(reason)
+        self.until = until  # epoch seconds, when the limit says it resets
+
+
 class AgentFailure(Exception):
     """The agent could not produce a usable result. The worker posts nothing: the lease lapses
     and the PM retries the run on its infrastructure-retry budget."""
@@ -74,6 +86,8 @@ class Worker:
         self.github = github
         self.heartbeat_every = heartbeat_every
         self._unpostable: set[str] = set()  # runs whose report GitHub refused: not paid for twice
+        self._paused: dict[str, int] = {}  # run_id -> when a usage limit lets it run again
+        self._pauses: dict[str, int] = {}  # run_id -> how many times it was paused
         self.runner = runner
         self.me = me  # this runner's Worker App identity
         self.pm = pm
@@ -93,6 +107,11 @@ class Worker:
             if c.author.user_id == self.me.user_id
             for run in _run_markers(c.body)
         }
+        self._paused = {
+            r: until
+            for r, until in self._paused.items()
+            if r in {a.run_id for a in state.active_runs}
+        }
         mine = [
             run
             for run in state.active_runs
@@ -103,13 +122,27 @@ class Worker:
         ]
         done: list[str] = []
         for run in mine:
-            write_heartbeat(self.github, self.runner, [run.run_id], now)
+            if now < self._paused.get(run.run_id, 0):
+                continue  # still waiting for a usage limit to reset
+            self._paused.pop(run.run_id, None)
+            self.beat(now, running=[run.run_id])
             try:
                 self._execute(issue, run, state.spec_rev, state.approved_spec_rev, state.answers)
+            except QuotaPause as pause:
+                resume = pause.until if pause.until is not None else now + PAUSE_DEFAULT
+                self._pauses[run.run_id] = self._pauses.get(run.run_id, 0) + 1
+                if resume - now <= PAUSE_BUDGET and self._pauses[run.run_id] <= MAX_PAUSES:
+                    self._paused[run.run_id] = resume
+                continue
             except AgentFailure:
                 continue
             done.append(run.run_id)
         return done
+
+    def beat(self, now: int, running: Sequence[str] = ()) -> None:
+        """Report the runs this runner holds: the one being executed and any paused by a limit."""
+        paused = {r: until for r, until in self._paused.items() if until - now <= PAUSE_BUDGET}
+        write_heartbeat(self.github, self.runner, [*running, *paused], now, paused)
 
     def _execute(
         self,

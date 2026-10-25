@@ -7,7 +7,7 @@ reassigned after a backoff, up to 3 retries per state, then the issue is blocked
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from concert.core.decide import Proposed
 from concert.core.derive import IssueState
@@ -47,6 +47,7 @@ class Heartbeat:
     runner: str
     at: int
     run_ids: frozenset[str]
+    paused: Mapping[str, int] = field(default_factory=dict[str, int])  # run_id -> resumes at
 
 
 def backoff_seconds(attempt: int) -> int:

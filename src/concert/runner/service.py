@@ -52,7 +52,7 @@ class Service:
         ensure_orphan_branch(self.pm_github, EVENTS_BRANCH, "concert")
         for name in (self.runner, "pm"):
             ensure_orphan_branch(self.pm_github, heartbeat_ref(name), "concert")
-        write_heartbeat(self.worker.github, self.runner, [], now)
+        self.worker.beat(now)
         write_heartbeat(self.pm_github, "pm", [], now)
         issues = [n for n in self.pm_github.list_open_issues() if n != self.steering]
         admin = self._steer(config, now)

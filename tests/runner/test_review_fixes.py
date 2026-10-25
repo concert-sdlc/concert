@@ -116,7 +116,13 @@ def test_the_worker_beats_its_heart_while_the_agent_is_running(
     beats: list[tuple[str, tuple[str, ...], int]] = []
     done = threading.Event()
 
-    def record(_gh: GitHubApi, runner: str, run_ids: Sequence[str], now: int) -> None:
+    def record(
+        _gh: GitHubApi,
+        runner: str,
+        run_ids: Sequence[str],
+        now: int,
+        paused: object = None,
+    ) -> None:
         beats.append((runner, tuple(run_ids), now))
         if len(beats) >= 3:
             done.set()
