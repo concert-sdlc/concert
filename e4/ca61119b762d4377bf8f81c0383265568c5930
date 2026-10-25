@@ -1,0 +1,27 @@
+src/concert/sandbox/executor.py
+  s_f3f5335312522f::t_3e52b61107be32 76-77,108-111
+src/concert/sandbox/proxy.py
+  s_f3f5335312522f::t_88aa38a4768b24 11,21,43,90-93
+src/concert/sandbox/workspace.py
+  s_f3f5335312522f::t_29f6bc2b45de38 10,55-56,60,66-88
+tests/sandbox/test_executor.py
+  s_f3f5335312522f::t_b10e7545e666ea 94-96,101-102
+tests/sandbox/test_review_fixes.py
+  s_f3f5335312522f::t_ec8e66bb9f5e49 1-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e4ca61119b762d4377bf8f81c0383265568c5930",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
