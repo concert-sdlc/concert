@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 
 from concert.core.derive import IssueState
+from concert.core.kits import safe_line
 from concert.core.transitions import Status
 
 _ORDER = list(Status)
@@ -26,7 +27,8 @@ def render_board(
     if blocked:
         lines += ["", "### Blocked"]
         lines += [
-            f"- #{n}: {s.blocked_reason or s.note or 'no reason recorded'}" for n, s in blocked
+            f"- #{n}: {safe_line(s.blocked_reason or s.note or 'no reason recorded')}"
+            for n, s in blocked
         ]
     waiting = [(n, s) for n, s in sorted(states.items()) if s.dependencies]
     if waiting:
@@ -44,7 +46,7 @@ def render_issue(number: int, state: IssueState | None, paused: bool) -> str:
         return f"Issue #{number} has not been seen by the PM."
     lines = [f"## #{number}: {state.status.value}"]
     if state.blocked_reason or state.note:
-        lines.append(f"> {state.blocked_reason or state.note}")
+        lines.append(f"> {safe_line(state.blocked_reason or state.note or '')}")
     if state.dependencies:
         lines.append(
             "Waiting on " + ", ".join(f"#{d.issue} ({d.kind})" for d in state.dependencies)

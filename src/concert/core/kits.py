@@ -188,6 +188,11 @@ def _escape(text: str) -> str:
     return text.replace("```", "'''").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def safe_line(text: str) -> str:
+    """Untrusted text as one inert line: no fences or markup, no pings, no line breaks."""
+    return _escape(text).replace("@", "@\u200b").replace("\n", " ").strip()
+
+
 def _single_line(text: str) -> str:
     return _escape(text).strip()
 
@@ -198,7 +203,7 @@ def blocker_marker(key: str) -> str:
 
 def render_blocker(reason: str, targets: Sequence[str], key: str) -> str:
     """Why the issue stopped, and the commands that can move it on."""
-    shown = _escape(reason).replace("@", "@\u200b").replace("\n", " ").strip()
+    shown = safe_line(reason)
     options = [f"/unblock {target}" for target in targets]
     return "\n".join(
         [

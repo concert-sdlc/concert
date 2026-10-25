@@ -83,6 +83,9 @@ from concert.github.mirror import Mirror, publish_events, reconcile
 _COMMITTING = frozenset({RunState.SPEC, RunState.IMPLEMENTING, RunState.INTEGRATING})
 
 
+_NO_FACTS = RunFacts(None, None, False, None, frozenset())
+
+
 @dataclass(frozen=True)
 class RunnerConfig:
     pm: Identity
@@ -355,7 +358,20 @@ class _Poll:
             handoff = item.handoff
             if handoff.run_id in state.accepted_runs or handoff.state.value != state.status.value:
                 continue
-            run_facts = self.facts.facts(self.issue, handoff, state, heads.get(handoff.run_id))
+            # Repository reads cost API calls, and anyone can post a forged block: read only for a
+            # block that already passes the cheap checks (assigned runner, unedited, in lease).
+            assignment = assignments.get(handoff.run_id)
+            plausible = (
+                assignment is not None
+                and item.block.author == assignment.runner == handoff.runner
+                and not item.block.edited
+                and item.block.posted_before_lease_expiry
+            )
+            run_facts = (
+                self.facts.facts(self.issue, handoff, state, heads.get(handoff.run_id))
+                if plausible
+                else _NO_FACTS
+            )
             decision = accept_handoff(handoff, assignments, item.block, run_facts)
             if isinstance(decision, Accepted):
                 accepted.append(AcceptedHandoff(handoff, decision, item.comment_id))

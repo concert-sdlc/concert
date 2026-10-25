@@ -77,10 +77,11 @@ class AdminState:
     paused_issues: frozenset[int] = frozenset()
     resets: Mapping[int, Status] = field(default_factory=dict[int, Status])
     consumed: frozenset[int] = frozenset()  # comment ids already handled
+    blocked: str | None = None  # the Steering history cannot be trusted: everything waits
 
     def holds(self, issue: int) -> bool:
         """New work (runs, merges) for this issue waits."""
-        return self.paused or issue in self.paused_issues
+        return self.paused or self.blocked is not None or issue in self.paused_issues
 
 
 def fold_admin(events: Sequence[Mapping[str, Any]]) -> AdminState:

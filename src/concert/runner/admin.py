@@ -41,6 +41,10 @@ def process_steering(
 ) -> AdminState:
     comments = github.list_comments(steering)
     trusted = reconcile(github, mirror, steering, comments, config.pm)
+    if trusted.blocked_reason is not None:
+        # Fail closed: with no trusted history a pause could look lifted and every command
+        # new, and appending to a mirror we distrust would corrupt it for good.
+        return AdminState(blocked=trusted.blocked_reason)
     state = fold_admin(trusted.events)
     chain = [parse_event(e) for e in trusted.events]
     for item in extract_commands(comments, config.roles):
@@ -72,6 +76,8 @@ def mark_reset_applied(
 ) -> None:
     """Record that the reset requested for `issue` has been carried out."""
     trusted = reconcile(github, mirror, steering, github.list_comments(steering), config.pm)
+    if trusted.blocked_reason is not None:
+        return
     chain = [parse_event(e) for e in trusted.events]
     event = append_event(
         chain, epoch=config.epoch, kind="admin_reset_applied", data={"issue": issue, "at": now}

@@ -52,12 +52,14 @@ def _steering_issue(github: GitHubApi) -> int:
 
 
 def _pr(github: GitHubApi, branch: str, base: str, files: dict[str, str], title: str) -> int:
-    existing = github.find_pr(branch)
-    if existing is not None:
-        return existing.number
-    if github.get_ref(branch) is None:
-        github.create_branch(branch, base)
-        github.commit(branch, title, files, author=_AUTHOR, committer=_AUTHOR)
-    pr = github.create_pr(branch, base, title)
-    github.mark_ready(pr.number)
+    """Each step looks at its own result, so a re-run finishes whatever a crash left undone."""
+    pr = github.find_pr(branch)
+    if pr is None:
+        if github.get_ref(branch) is None:
+            github.create_branch(branch, base)
+        if not github.list_commits(base, branch):  # a branch left empty by a crash
+            github.commit(branch, title, files, author=_AUTHOR, committer=_AUTHOR)
+        pr = github.create_pr(branch, base, title)
+    if pr.draft:
+        github.mark_ready(pr.number)
     return pr.number

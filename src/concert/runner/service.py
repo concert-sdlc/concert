@@ -69,7 +69,10 @@ class Service:
         for number, result in cycle.results.items():
             if result.reset_handled and self.steering is not None:
                 mark_reset_applied(self.pm_github, self.mirror, self.steering, config, number, now)
-        self._known = {**self._known, **cycle.states}  # a failed poll keeps its last known state
+        # a failed poll keeps its last known state; a closed issue is forgotten, or its last
+        # state (say, integrating) would hold the queue until the process restarts
+        still_open = set(issues)
+        self._known = {n: s for n, s in {**self._known, **cycle.states}.items() if n in still_open}
         self.errors.extend(f"#{n}: {message}" for n, message in cycle.errors.items())
         for issue in issues:
             try:
@@ -89,6 +92,10 @@ class Service:
             return render_issue(target, self._known.get(target), held.holds(target))
 
         self._admin = process_steering(self.pm_github, self.mirror, self.steering, config, status)
+        if self._admin.blocked is not None:
+            self.errors.append(
+                f"steering is not trusted, everything is on hold: {self._admin.blocked}"
+            )
         return self._admin
 
     def _load_config(self) -> RunnerConfig:
