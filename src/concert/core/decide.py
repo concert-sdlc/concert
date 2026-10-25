@@ -112,11 +112,16 @@ def decide(
     verify_reruns: int = 1,
     answers: Sequence[Answer] = (),
     dependency_problem: Callable[[int], str | None] = _no_problem,
+    staging_moved: bool = False,
+    refresh_limit: int = 0,
 ) -> list[Proposed]:
-    """`dependency_problem(n)`: why this issue may not wait on #n (the caller knows the board)."""
+    """`dependency_problem(n)`: why this issue may not wait on #n (the caller knows the board).
+    `staging_moved`: staging advanced since the branch base; with `refresh_limit` refreshes left
+    to spend, a passed UAT run waits for the PM's pre-gate refresh instead of asking a human."""
     if state.blocked_reason is not None or is_terminal(state.status):
         return []
-    from_handoffs = _from_handoffs(state, handoffs, verify_reruns, dependency_problem)
+    refresh = staging_moved and state.refreshes < refresh_limit
+    from_handoffs = _from_handoffs(state, handoffs, verify_reruns, dependency_problem, refresh)
     if from_handoffs:
         return from_handoffs
     if state.status is Status.NEEDS_INPUT:
@@ -145,6 +150,7 @@ def _from_handoffs(
     handoffs: Sequence[AcceptedHandoff],
     verify_reruns: int,
     problem: Callable[[int], str | None],
+    refresh_first: bool = False,
 ) -> list[Proposed]:
     pending = sorted(
         (
@@ -176,6 +182,13 @@ def _from_handoffs(
         return [_accepted(first), again]
     if state.status is Status.INTEGRATING and first.decision.trigger is Trigger.READY_TO_MERGE:
         return [_accepted(first)]  # the issue moves on once the PM has merged
+    if (
+        refresh_first
+        and state.status is Status.UAT
+        and state.issue_type is not IssueType.REVERT
+        and first.decision.trigger is Trigger.PASSED
+    ):  # no transition yet: the PM rebases onto staging first, then review and UAT run again
+        return [_accepted(first), *_run_evidence(first)]
     return [
         _accepted(first),
         *_agent_dependencies(state, first, problem),
@@ -383,14 +396,15 @@ def _unblock_events(target: str) -> list[Proposed]:
 # --- shared ----------------------------------------------------------------------------------
 
 
-def _trigger_events(state: IssueState, trigger: Trigger | None) -> list[Proposed]:
+def _trigger_events(
+    state: IssueState, trigger: Trigger | None, note: str | None = None
+) -> list[Proposed]:
     """The events for one trigger: a charge first when the return is a re-entry. If the
     charge would exceed the budget the issue goes to blocked instead, uncharged."""
     if trigger is None:
         return []
     cause = _CAUSE.get(trigger)
     charge: list[Proposed] = []
-    note: str | None = None
     if cause is not None:
         _counters, outcome = state.counters.charge(cause)
         if outcome is Outcome.BLOCKED:
@@ -428,6 +442,22 @@ def plan_integration(state: IssueState, policy: GatePolicy, at_queue_head: bool)
         Trigger.APPROVE_REVERT if state.issue_type is IssueType.REVERT else Trigger.APPROVE_UAT
     )
     return _trigger_events(state, trigger)
+
+
+def plan_refresh(state: IssueState) -> list[Proposed]:
+    """After the PM rebased the branch onto staging: a clean rebase sends the issue back through
+    review and UAT on the new head; a conflict sends it to implementing (a second one asks the
+    admins). Staging churn is never charged against the retry budget."""
+    if state.refresh_result is None or state.status not in (Status.UAT, Status.INTEGRATING):
+        return []
+    if state.refresh_result == "clean":
+        return _trigger_events(state, Trigger.REFRESHED)
+    paths = state.refresh_note or "unknown paths"
+    if state.refresh_conflicts >= 2:
+        note = f"rebasing onto staging conflicts again ({paths}); an admin must decide"
+        return _trigger_events(state, Trigger.REFRESH_ESCALATED, note)
+    note = f"rebasing onto staging conflicts in: {paths}"
+    return _trigger_events(state, Trigger.REFRESH_CONFLICT, note)
 
 
 def plan_merged(state: IssueState) -> list[Proposed]:

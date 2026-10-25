@@ -169,5 +169,6 @@ def _process_yaml(
                 ],
             }
         },
+        "integration": {"pregate_refresh": 2},
         "states": {"verifying_staging": {"rerun_on_failure": 1, "on_failure": "auto_revert"}},
     }

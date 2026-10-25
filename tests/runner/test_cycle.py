@@ -51,7 +51,7 @@ def test_the_next_issue_waits_while_the_first_is_integrating_and_verifying() -> 
 
 
 def test_the_next_issue_integrates_once_the_first_is_on_staging() -> None:
-    world, first, second, h1, _h2 = two_ready_issues()
+    world, first, second, h1, h2 = two_ready_issues()
     cycle(world, first, second)
     report_ready_to_merge(world, first, h1)
     cycle(world, first, second)
@@ -69,7 +69,10 @@ def test_the_next_issue_integrates_once_the_first_is_on_staging() -> None:
     assert world.state(first).status is Status.ON_STAGING
     assert result.head is None or result.head == second
     cycle(world, first, second)
-    assert world.state(second).status is Status.INTEGRATING
+    # staging moved with the first merge, so the second is rebased onto it before it integrates
+    state = world.state(second)
+    assert state.status is Status.IN_REVIEW
+    assert state.head_sha != h2 and len(state.pm_commits) == 1
 
 
 def test_a_frozen_queue_holds_the_next_issue() -> None:

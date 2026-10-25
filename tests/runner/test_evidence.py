@@ -4,6 +4,7 @@ from dataclasses import replace
 
 from concert.core.commands import Role
 from concert.core.evidence import GatePolicy
+from concert.core.paths import changed_paths
 from concert.core.transitions import IssueType, Status
 from tests.runner.helpers import ALICE, World
 from tests.runner.test_poll import REVIEWERS, to_implementing
@@ -232,4 +233,10 @@ def test_changes_that_landed_on_staging_meanwhile_are_not_the_issues_changes() -
     gh = world.fake.client(world.pm_identity)
     gh.commit("staging", "someone else", {"payments/x.py": "1"}, author="x", committer="x")
     world.say(ALICE, issue, f"/approve uat {head}")
-    assert world.poll(issue).status is Status.INTEGRATING
+    # at the head of the queue the branch is rebased onto the new staging and reviewed again
+    assert world.poll(issue).status is Status.IN_REVIEW
+    state = world.state(issue)
+    own = changed_paths(
+        world.pm.read_tree(state.branch_base or ""), world.pm.read_tree(state.head_sha or "")
+    )
+    assert "payments/x.py" not in own  # staging's change is not the issue's, so no security gate

@@ -111,6 +111,11 @@ class IssueState:
     verify_failed: bool = False  # the failure is final: no re-run is left
     merge_sha: str | None = None  # the merge commit on the base branch, once the PM merged
     evidence: tuple[Evidence, ...] = ()  # results and approvals, in order, each bound to a head
+    refreshes: int = 0  # pre-gate refreshes done (they are bounded and never charged)
+    refresh_conflicts: int = 0  # rebases onto staging that conflicted
+    refresh_result: str | None = None  # "clean" or "conflict" until the issue has moved on
+    refresh_note: str | None = None  # the conflicting paths
+    pm_commits: tuple[str, ...] = ()  # commits the PM itself made on the issue branch (rebases)
 
 
 class _Conflict(Exception):
@@ -156,6 +161,8 @@ def _fresh_state_bookkeeping(state: IssueState) -> IssueState:
         deferrals=0,
         infra_attempts=MappingProxyType({}),
         last_expiry_at=None,
+        refresh_result=None,
+        refresh_note=None,
     )
 
 
@@ -385,6 +392,25 @@ def _apply(state: IssueState, event: Event) -> IssueState:
                 revert_pr=int(result["number"]),
                 revert_branch=str(result["branch"]),
                 revert_head=str(result["sha"]),
+            )
+        if action == "rebase":
+            if result.get("conflict"):
+                return replace(
+                    state,
+                    refresh_result="conflict",
+                    refresh_note=str(result["conflict"]),
+                    refresh_conflicts=state.refresh_conflicts + 1,
+                )
+            pre_gate = pending is not None and pending.data.get("stage") == "uat"
+            return replace(
+                state,
+                head_sha=str(result["sha"]),
+                branch_base=str(result["base"]),
+                pm_commits=(*state.pm_commits, str(result["sha"])),
+                refresh_result="clean",
+                refreshes=state.refreshes + (1 if pre_gate else 0),
+                settled_runs=frozenset(),
+                settled_reviewers=frozenset(),
             )
         if action == "merge_revert" and result.get("sha"):
             return replace(

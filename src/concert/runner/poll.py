@@ -11,7 +11,7 @@ import hashlib
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Protocol
+from typing import Protocol, cast
 
 from concert.core.assign import Heartbeat, RunnerInfo, expire_leases, plan_assignments
 from concert.core.ci import plan_ci_evidence, plan_review_evidence
@@ -32,6 +32,7 @@ from concert.core.decide import (
     decide,
     plan_integration,
     plan_merged,
+    plan_refresh,
     plan_revert_ci,
     plan_verify_failure,
 )
@@ -100,6 +101,7 @@ class RunnerConfig:
     protected_paths: Sequence[str] = ()  # an auto-revert touching these is never merged by the PM
     on_failure: str = "freeze"  # staging verification: "freeze" or "auto_revert"
     verify_reruns: int = 1  # automatic re-runs of a failed verification (flaky tests)
+    pregate_refresh: int = 2  # rebases onto a moved staging before the human UAT kit, at most
 
 
 class FactsProvider(Protocol):
@@ -222,8 +224,12 @@ class _Poll:
         self._admin_reviews()
         self._revert_ci()
         self._effects()
+        self._refresh()
         if not self.held and not self._unmet_for_integration():
             self._integrate()
+            # reaching the head of the queue may call for a rebase; do it before a run is assigned
+            self._effects()
+            self._refresh()
         self._after_merge()
         self._after_verify()
         if not self.held and not self._unmet_to_start():
@@ -328,6 +334,8 @@ class _Poll:
             or is_terminal(state.status)
         ):
             return False
+        if any(i.action == "rebase" for i in state.pending_intents):
+            return False  # the branch may already be at the new head; the outcome settles it
         head = self.github.get_ref(self.branch)
         if head is None:
             return False
@@ -391,6 +399,8 @@ class _Poll:
             self.config.verify_reruns,
             self._answers(all_comments),
             self._problem_with,
+            staging_moved=self._staging_moved(),
+            refresh_limit=self.config.pregate_refresh,
         )
         if proposals:
             self._post(proposals)
@@ -457,7 +467,9 @@ class _Poll:
                     self.state.branch_base or self.config.base_branch, handoff.commit_sha
                 )
             ]
-            verdict = check_commit_binding(commits, [*prior, handoff])
+            verdict = check_commit_binding(
+                commits, [*prior, handoff], inherited=[self.state.pm_commits]
+            )
             if isinstance(verdict, ForeignCommits):
                 return self._block(f"foreign commit: {', '.join(verdict.shas)}")
         return False
@@ -561,6 +573,8 @@ class _Poll:
                 gate_ready=self._gate_ready(),
                 awaiting_human=self._awaiting_human(),
                 auto_revert=self.config.on_failure == "auto_revert",
+                staging_moved=self._staging_moved(),
+                refresh_limit=self.config.pregate_refresh,
             )
             if effect is None:
                 return
@@ -591,6 +605,8 @@ class _Poll:
                 str(data["head"]), str(data["base"]), str(data["title"])
             )
             return {"number": pr.number}
+        if effect.action == "rebase":
+            return self._rebase(str(data["branch"]), str(data["head"]), str(data["stage"]))
         if effect.action == "mark_ready":
             number = int(data["number"])
             self.github.mark_ready(number)
@@ -684,6 +700,75 @@ class _Poll:
             security_sensitive=policy.security_sensitive if policy else False,
             protected_files=[p for p in touched if matches_any(p, self.config.protected_paths)],
         )
+
+    def _staging_moved(self) -> bool:
+        """Does the base branch have commits the issue's branch lacks?"""
+        state = self.state
+        if (
+            state.status not in (Status.UAT, Status.INTEGRATING)
+            or state.head_sha is None
+            or state.issue_type is IssueType.REVERT  # its PR comes from GitHub and is not rebased
+        ):
+            return False
+        try:
+            return bool(self.github.list_commits(state.head_sha, self.config.base_branch))
+        except NotFound:
+            return False  # a head that cannot be compared is left to the other checks
+
+    def _refresh(self) -> None:
+        planned = plan_refresh(self.state)
+        if planned:
+            self._post(planned)
+
+    def _rebase(self, branch: str, head: str, stage: str) -> dict[str, int | str | None]:
+        """Re-apply what the branch changed on top of the current base head, file by file. A file
+        both sides changed differently is a conflict and nothing is touched. The new commit is
+        built on a scratch ref and the issue branch is then pointed at it, so a crash leaves
+        either the old head or the new one, and a retry starts over from the same inputs."""
+        github = self.github
+        target = github.get_ref(self.config.base_branch)
+        if target is None:
+            return {"error": f"no {self.config.base_branch} branch"}
+        own = github.list_commits(
+            self.config.base_branch, head
+        )  # the branch's commits, oldest first
+        fork = own[0].parent if own else head  # where the branch left the base lineage
+        old, mine, theirs = (
+            github.read_tree(fork),
+            github.read_tree(head),
+            github.read_tree(target),
+        )
+        keys_old, keys_mine, keys_theirs = (_ids(old), _ids(mine), _ids(theirs))
+        changes: dict[str, str | None] = {}
+        conflicts: list[str] = []
+        for path in sorted({*keys_old, *keys_mine, *keys_theirs}):
+            o, m, t = keys_old.get(path), keys_mine.get(path), keys_theirs.get(path)
+            if m == o or t == m:
+                continue  # the branch left it alone, or staging already has the branch's version
+            if t != o:
+                conflicts.append(path)
+            else:
+                changes[path] = mine.get(path)
+        if conflicts:
+            return {"conflict": ", ".join(conflicts[:10]), "stage": stage}
+        sha = target
+        if changes:
+            scratch = f"concert-rebase/{self.issue}"
+            if github.get_ref(scratch) is None:
+                github.create_branch(scratch, target)
+            else:
+                github.update_ref(scratch, target, force=True)
+            sha = github.commit(
+                scratch,
+                f"Rebase #{self.issue} onto {self.config.base_branch}",
+                changes,
+                author=self.config.pm.login,
+                committer=self.config.pm.login,
+            )
+        github.update_ref(branch, sha, force=True)
+        if sha != target and github.get_ref(f"concert-rebase/{self.issue}") is not None:
+            github.delete_ref(f"concert-rebase/{self.issue}")
+        return {"sha": sha, "base": target}
 
     def _open_revert(self, number: int) -> dict[str, int | str | None]:
         try:
@@ -915,3 +1000,9 @@ def unblock_targets(state: IssueState) -> frozenset[Status]:
         if state.head_sha is not None:
             targets.add(Status.IN_REVIEW)
     return frozenset(targets)
+
+
+def _ids(tree: Mapping[str, str]) -> Mapping[str, str]:
+    """What identifies each file's content: its blob id on a real repository (no file is read),
+    the content itself where the tree is a plain mapping."""
+    return cast("Mapping[str, str]", getattr(tree, "blob_ids", tree))

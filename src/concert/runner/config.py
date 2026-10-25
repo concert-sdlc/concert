@@ -47,6 +47,9 @@ def load_runner_config(text: str, epoch: int, base_branch: str) -> RunnerConfig:
     budget = _mapping(doc.get("defaults")).get("retry_budget", DEFAULT_BUDGET)
     if not isinstance(budget, int) or budget < 1:
         raise ConfigError("defaults.retry_budget must be a positive integer")
+    refresh = _mapping(doc.get("integration")).get("pregate_refresh", 2)
+    if not isinstance(refresh, int) or isinstance(refresh, bool) or refresh < 0:
+        raise ConfigError("integration.pregate_refresh must be a non-negative integer")
     admins = {u for u, role in roles.items() if role is Role.ADMIN}
     approvers = {u for u, role in roles.items() if role >= Role.APPROVER}
     policy = GatePolicy(
@@ -81,6 +84,7 @@ def load_runner_config(text: str, epoch: int, base_branch: str) -> RunnerConfig:
         protected_paths=tuple(map(str, _list(doc.get("protected_paths")))),
         on_failure=str(on_failure),
         verify_reruns=int(verify.get("rerun_on_failure", 1)),
+        pregate_refresh=refresh,
     )
 
 

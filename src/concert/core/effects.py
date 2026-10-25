@@ -46,9 +46,12 @@ def plan_effect(
     gate_ready: bool = False,
     auto_revert: bool = False,
     awaiting_human: bool = False,
+    staging_moved: bool = False,
+    refresh_limit: int = 0,
 ) -> Effect | None:
     """`gate_ready`: every merge requirement holds on the current head; `awaiting_human`: only human
-    approvals are still missing (the caller evaluates both)."""
+    approvals are still missing; `staging_moved`: staging advanced since the branch base (the
+    caller evaluates all three)."""
     if state.pending_intents:
         pending = state.pending_intents[0]
         return Effect(pending.key, pending.action, pending.data, resumed=True)
@@ -82,6 +85,9 @@ def plan_effect(
         if key in state.questions_posted:
             return None
         return Effect(key, "post_question", {"doubts": list(state.doubts)}, resumed=False)
+    rebase = _plan_rebase(state, issue, staging_moved, refresh_limit)
+    if rebase is not None:
+        return rebase
     kit = _plan_kit(state, awaiting_human)
     if kit is not None:
         return kit
@@ -96,6 +102,40 @@ def plan_effect(
         data = {"number": state.pr_number, "expected_head": state.head_sha}
         return Effect("merge", "merge", data, resumed=False)
     return _plan_revert(state) if auto_revert else None
+
+
+def _plan_rebase(
+    state: IssueState, issue: int, staging_moved: bool, refresh_limit: int
+) -> Effect | None:
+    """Bring the branch up to the staging head: before the human UAT kit (a bounded pre-gate
+    refresh, once automated UAT has passed) and when the issue reaches the queue head and
+    staging moved while it waited. Never for reverts, whose PR is made by GitHub."""
+    if (
+        not staging_moved
+        or state.issue_type is IssueType.REVERT
+        or state.refresh_result is not None
+        or state.head_sha is None
+        or state.branch_base is None
+    ):
+        return None
+    if state.status is Status.UAT and state.settled_runs and state.refreshes < refresh_limit:
+        stage = "uat"
+    elif (
+        state.status is Status.INTEGRATING
+        and not state.active_runs
+        and not state.settled_runs
+        and state.merge_sha is None
+    ):
+        stage = "integrating"
+    else:
+        return None
+    key = f"rebase:{len(state.pm_commits)}:{state.refresh_conflicts}"
+    data = {
+        "stage": stage,
+        "branch": state.branch or f"pm/{issue}",
+        "head": state.head_sha,
+    }
+    return Effect(key, "rebase", data, resumed=False)
 
 
 def _plan_revert(state: IssueState) -> Effect | None:

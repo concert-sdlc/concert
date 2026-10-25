@@ -54,6 +54,10 @@ class Trigger(Enum):
     REOPEN = "reopen"
     APPROVE_REVERT = "approve_revert"
     REJECT_REVERT = "reject_revert"
+    # the PM rebased the branch onto a moved staging head (pre-gate refresh, or at integrating)
+    REFRESHED = "refreshed"
+    REFRESH_CONFLICT = "refresh_conflict"  # the rebase conflicts: back to implementing, uncharged
+    REFRESH_ESCALATED = "refresh_escalated"  # a second conflict: admins are asked
 
 
 class IssueType(Enum):
@@ -122,6 +126,12 @@ _CODE_TABLE: dict[tuple[Status, Trigger], Status] = {
     (_S.HUMAN_UAT, _T.REJECT_UAT): _S.IMPLEMENTING,
     (_S.INTEGRATING, _T.READY_TO_MERGE): _S.VERIFYING_STAGING,
     (_S.INTEGRATING, _T.REBASED): _S.IN_REVIEW,
+    (_S.UAT, _T.REFRESHED): _S.IN_REVIEW,
+    (_S.UAT, _T.REFRESH_CONFLICT): _S.IMPLEMENTING,
+    (_S.UAT, _T.REFRESH_ESCALATED): _S.NEEDS_INPUT,
+    (_S.INTEGRATING, _T.REFRESHED): _S.IN_REVIEW,
+    (_S.INTEGRATING, _T.REFRESH_CONFLICT): _S.IMPLEMENTING,
+    (_S.INTEGRATING, _T.REFRESH_ESCALATED): _S.NEEDS_INPUT,
     (_S.VERIFYING_STAGING, _T.PASSED): _S.ON_STAGING,
     (_S.VERIFYING_STAGING, _T.FAILED_REVERTED): _S.IMPLEMENTING,
     (_S.VERIFYING_STAGING, _T.VERIFY_FAILED): _S.BLOCKED,  # freeze fallback
