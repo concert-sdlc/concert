@@ -1,0 +1,25 @@
+docs/LIVE_VALIDATION.md
+  s_f3f5335312522f::t_d036a4c0e2f0d3 128-129,132-135,138-157
+ops/egress/Dockerfile
+  s_f3f5335312522f::t_9adeae36d42905 1-11
+ops/egress/check.sh
+  s_f3f5335312522f::t_586a62f7a93276 1-35
+ops/egress/setup.sh
+  s_f3f5335312522f::t_3c46d30baf072a 1-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bc1f8d92cf29b782180df1cf050d91eff0573b8e",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
