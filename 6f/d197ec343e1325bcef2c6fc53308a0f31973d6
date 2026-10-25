@@ -1,0 +1,37 @@
+docs/LIVE_VALIDATION.md
+  s_f3f5335312522f::t_cbb227cc5936d1 128-130
+ops/agent/Dockerfile
+  s_f3f5335312522f::t_209975f38a25e2 1-28
+ops/agent/build.sh
+  s_f3f5335312522f::t_820946e2448b9a 1-19
+src/concert/adopt/adopt.py
+  s_f3f5335312522f::t_f8d8e739ed997e 1-180
+src/concert/adopt/plan.py
+  s_f3f5335312522f::t_37fa92d4028d11 83,129
+src/concert/cli/__init__.py
+  s_f3f5335312522f::t_fd5df83e1de05d 11,43-44,129-144,193-204
+src/concert/cli/adopting.py
+  s_f3f5335312522f::t_46cbe665a522be 1-132
+tests/adopt/test_adopt.py
+  s_f3f5335312522f::t_2f3766398f83bc 1-113
+tests/cli/test_adopt_cli.py
+  s_f3f5335312522f::t_0796f51b7df159 1-119
+tests/fakes/github.py
+  s_f3f5335312522f::t_94f68f47ac9534 77-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6fd197ec343e1325bcef2c6fc53308a0f31973d6",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
