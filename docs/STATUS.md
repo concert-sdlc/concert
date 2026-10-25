@@ -9,26 +9,44 @@ see [LIVE_VALIDATION.md](LIVE_VALIDATION.md)); nothing has run against Docker or
 | Area | Where | Notes |
 |---|---|---|
 | Event log, derived state, transitions | `core/events`, `derive`, `transitions` | hash-chained pm-events; the log is the source of truth |
-| Decisions | `core/decide`, `effects`, `ci`, `evidence`, `queue`, `dependencies`, `kits` | pure; no I/O |
-| Poll loop (one issue) | `runner/poll.py` | adoption, branch checks, commit binding, intake, effects, evidence, merge gate |
+| Decisions | `core/decide`, `effects`, `ci`, `evidence`, `queue`, `dependencies`, `kits`, `classify`, `workflow` | pure; no I/O |
+| Poll loop (one issue) | `runner/poll.py` | adoption, branch checks, commit binding, intake, effects, evidence, merge gate, rebases |
 | Cycle (all issues) | `runner/cycle.py` | queue head, freeze, dependencies, fails closed on a failed poll |
-| Service tick + CLI | `runner/service.py`, `cli/` | reloads `process.yaml`, heartbeats, per-issue error isolation |
-| Worker + agent | `runner/worker.py`, `agents/claude_code.py` | WIP refs, handoffs, workflow edits never pushed |
-| Sandbox | `sandbox/` | workspace safety, Docker argv, egress policy and CONNECT proxy |
+| Service tick + CLI | `runner/service.py`, `cli/` | reloads `process.yaml`, heartbeats, per-issue error isolation, daily digest |
+| Worker + agent | `runner/worker.py`, `agents/claude_code.py` | WIP refs, handoffs, quota pauses, lessons, workflow edits never pushed |
+| Sandbox | `sandbox/`, `ops/agent/` | workspace safety, Docker argv, egress policy and CONNECT proxy, the agent image |
 | GitHub | `github/` | fake (tests), REST+GraphQL client, App auth, urllib transport |
+| Adoption | `adopt/`, `cli/adopting.py` | `concert adopt` (report, admin approval, PRs); the generated `concert-ci.yml` and `concert-watchdog.yml` |
+| Metrics | `core/metrics.py`, `runner/digest.py` | lead time, first pass, re-entries, reverts by merge week, human-gate waits |
 
 Lifecycle features: gates and kits, CI evidence, security/protected-path requirements, merge at an
-expected head, staging verification with one re-run, auto-revert (exact-inverse check) and
-re-landing, freeze, hotfixes, `needs_input`, dependencies, close/reopen, duplicates, blocker comments.
+expected head, pre-gate refresh and queue-head rebase (file-level three-way, conflicts go to
+implementing then needs_input), staging verification with one re-run, auto-revert (exact-inverse
+check, CI re-run once) and re-landing, freeze, hotfixes, `needs_input`, dependencies, close/reopen,
+duplicates, blocker comments, agent usage-limit pauses, `docs` and `workflow` issue types, lesson
+capture and run-start selection, admin `/pm pause|resume|status|reset`, the watchdog.
 
-## Not built yet (no person needed)
+## Not built yet
 
-- Admin `/pm` commands (`pause`, `resume`, `reset`, `unfreeze`, `revert`, `status`, ...).
-- `concert adopt` and generated workflows (`concert-ci.yml`, `concert-watchdog.yml`) with hash pinning.
-- Daily digest and delivery metrics; lesson capture; docs/workflow issue types.
-- Pre-gate refresh (rebase before the UAT kit) and the `integrating` re-prove path.
-- Revert-failure re-run of CI on the revert PR (a failure freezes at once).
-- Quota/pause handling for the agent; `needs_prerequisite` only defers (see below).
+Left out of Milestone 1 on purpose or not reached; none needs a person except where noted.
+
+- **Branch protection:** `adopt` applies no rulesets and writes `protection: detect`; the
+  detect-only incident handling (holds, `/pm accept-push`, `/pm revert-push`) does not exist, and
+  nothing checks at startup that the rules a project relies on are in place.
+- **More admin commands:** `/pm revert #N`, `/pm unfreeze`, `/pm reassign`, `/pm adopt-commits`,
+  `/pm runner disable`, `/pm not-security-sensitive`, `/pm undo`. A frozen queue is cleared with
+  `/unblock` on the blocked issue.
+- **Credential gateway:** the agent gets the model credential as an environment variable
+  (`CONCERT_AGENT_AUTH`) instead of through a proxy that injects it, so a prompt-injected agent can
+  read it inside its own sandbox (the egress allowlist still limits where it can send it).
+- **Local-first verification:** `ci.local` is rendered into the CI workflow, but workers do not run
+  the checks before pushing, so CI minutes are spent on every ready PR.
+- **Digest gaps:** GitHub health, Actions minutes this month, and manual-revert events.
+- **Adopt gaps:** no Projects v2 board, labels or App creation (use `ops/create-github-app.py` and
+  `gh project`), no gap issues, no workflow-trigger inventory.
+- **Lessons:** curation PRs, packs and export are Milestone 2 by design.
+- **Milestone 2 by design:** fleet and coordinator failover, reprioritization, `concert init`, the
+  plugin, a second agent adapter.
 
 ## Known deviations from the design
 
@@ -38,13 +56,19 @@ re-landing, freeze, hotfixes, `needs_input`, dependencies, close/reopen, duplica
   effect on approval). Agent-declared dependencies are applied at once.
 - The worker reads whole trees to materialise a workspace; for big repos it should clone.
 - `edited` comments are detected by `updated_at != created_at` over REST.
-- Issue closed after merge is noted, but no Steering note is posted (there is no Steering issue yet).
+- A staging rebase is a file-level merge into one commit: two edits to the same file conflict even
+  when git could have merged them, which sends the issue back to implementing.
+- The digest covers the issues the runner has seen since it started (their events are kept in
+  memory), not the whole history.
+- The quota pause keeps a run's lease by listing it in the heartbeat; after 6 hours or 24 pauses it
+  is left to lapse and is charged as an infra retry.
 
 ## Needs a person
 
 1. GitHub Apps (PM and Worker), installation ids, bot user ids, private keys (paths in env).
 2. A Projects v2 board with a single-select `Status` whose options are the status values.
-3. Host setup scripts with `sudo` (`ops/` in the design repo), Docker + gVisor, the agent image.
+3. Host setup scripts with `sudo` (`ops/` in the design repo), Docker + gVisor; the agent image
+   builds with `ops/agent/build.sh`.
 4. `process.yaml` on the staging branch (see `tests/runner/test_service.py` for a minimal one).
 5. Live validation of `RestGitHub` (GraphQL shapes, check-run/workflow mapping) and the Friday test.
 
