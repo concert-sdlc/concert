@@ -12,13 +12,15 @@ from dataclasses import dataclass, field
 
 from concert.core.admin import AdminState
 from concert.core.derive import IssueState
+from concert.core.metrics import Timed, compute, observe
 from concert.github.api import GitHubApi, Identity, NotFound
 from concert.github.branches import EVENTS_BRANCH, ensure_orphan_branch
-from concert.github.heartbeats import heartbeat_ref, write_heartbeat
+from concert.github.heartbeats import heartbeat_ref, read_heartbeat, write_heartbeat
 from concert.github.mirror import Mirror
 from concert.runner.admin import mark_reset_applied, process_steering
 from concert.runner.config import ConfigError, load_runner_config
 from concert.runner.cycle import run_cycle
+from concert.runner.digest import post_digest_once_a_day, render_digest
 from concert.runner.poll import FactsProvider, RunnerConfig
 from concert.runner.status import render_board, render_issue
 from concert.runner.worker import Worker
@@ -41,6 +43,10 @@ class Service:
     _known: dict[int, IssueState] = field(default_factory=dict[int, IssueState])
     _config: tuple[str, RunnerConfig] | None = None
     _admin: AdminState = field(default_factory=AdminState)
+    # each issue's last status and event timeline, kept after it closes so the digest can count it
+    _history: dict[int, tuple[str, tuple[Timed, ...]]] = field(
+        default_factory=dict[int, tuple[str, tuple[Timed, ...]]]
+    )
 
     def tick(self) -> None:
         now = int(self.clock())
@@ -74,11 +80,42 @@ class Service:
         still_open = set(issues)
         self._known = {n: s for n, s in {**self._known, **cycle.states}.items() if n in still_open}
         self.errors.extend(f"#{n}: {message}" for n, message in cycle.errors.items())
+        for number, result in cycle.results.items():
+            self._history[number] = (result.status.value, result.timeline)
+        self._digest(config, now)
         for issue in issues:
             try:
                 self.worker.run_once(issue, now)
             except Exception as error:  # noqa: BLE001  one issue's failure must not stop the others
                 self.errors.append(f"#{issue}: {error}")
+
+    def _digest(self, config: RunnerConfig, now: int) -> None:
+        """Once a day, in Steering: the delivery metrics and what needs a person's attention."""
+        if self.steering is None:
+            return
+        try:
+            figures = compute([observe(n, tl, st) for n, (st, tl) in self._history.items()], now)
+            body = render_digest(figures, self._attention(config, now))
+            post_digest_once_a_day(self.pm_github, self.steering, config.pm, now, body)
+        except Exception as error:  # noqa: BLE001  a digest problem must not stop the PM
+            self.errors.append(f"digest: {error}")
+
+    def _attention(self, config: RunnerConfig, now: int) -> list[str]:
+        items: list[str] = []
+        for number, state in sorted(self._known.items()):
+            if state.status.value == "blocked":
+                items.append(f"#{number} is blocked: {state.blocked_reason or state.note or '?'}")
+            for dependency in state.dependencies:
+                items.append(f"#{number} is waiting on #{dependency.issue} ({dependency.kind})")
+        for runner in config.runners:
+            beat = read_heartbeat(self.pm_github, runner.name)
+            if beat is None:
+                items.append(f"runner {runner.name} has no heartbeat")
+            elif now - beat.at > 600:
+                items.append(f"runner {runner.name} was last seen {(now - beat.at) // 60} min ago")
+            for run, until in sorted(beat.paused.items() if beat else []):
+                items.append(f"run {run} is paused by a usage limit until {until}")
+        return items
 
     def _steer(self, config: RunnerConfig, now: int) -> AdminState:
         """Read the admins' commands from the Steering issue; none without one."""

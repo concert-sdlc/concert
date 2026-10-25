@@ -65,6 +65,7 @@ from concert.core.kits import (
     render_spec_kit,
     render_uat_kit,
 )
+from concert.core.metrics import Timed
 from concert.core.paths import WORKFLOW_PATHS, changed_paths, matches_any
 from concert.core.transitions import IssueType, Status, Trigger, is_terminal
 from concert.github.api import Comment, Conflict, GitHubApi, Identity, NotFound
@@ -123,6 +124,7 @@ class PollResult:
     ready_for_integration: bool = False  # in human_uat with every merge requirement met
     reset_handled: bool = False  # an admin's reset request for this issue no longer needs to wait
     waiting_on: tuple[int, ...] = ()  # issues whose unfinished work is holding this one back
+    timeline: tuple[Timed, ...] = ()  # the issue's events with their times, for the metrics
 
 
 def poll_issue(
@@ -181,6 +183,7 @@ class _Poll:
         self.records: list[EventRecord] = []
         self.handoff_items: list[HandoffComment] = []
         self.state = IssueState()
+        self._published_at: dict[int, int] = {}
 
     @property
     def branch(self) -> str:
@@ -194,6 +197,7 @@ class _Poll:
         if reconciled.republished:
             comments = self.github.list_comments(self.issue)
         extraction = extract_events(comments, self.config.pm)
+        self._published_at = {c.id: c.created_at for c in comments}
         self.records = [r for r in extraction.records if r.event in reconciled.events]
         self.raw = list(reconciled.events)
         self.state = derive(self.raw, budget=self.config.budget)
@@ -958,6 +962,14 @@ class _Poll:
         self.posted += len(new_events)
         self.state = derive(self.raw, budget=self.config.budget)
 
+    def _timeline(self) -> tuple[Timed, ...]:
+        """Each event with when its comment was posted (an event not yet published: now)."""
+        comment_of = {r.event["seq"]: r.comment_id for r in self.records}
+        return tuple(
+            Timed(event, self._published_at.get(comment_of.get(event.seq, -1), self.now))
+            for event in self.chain
+        )
+
     def _finish(self, blocked: str | None = None) -> PollResult:
         state = (
             replace(self.state, status=Status.BLOCKED, blocked_reason=blocked)
@@ -982,6 +994,7 @@ class _Poll:
             and not self._unmet_for_integration()
             and self._gate_ready(),
             reset_handled=self.reset_handled,
+            timeline=self._timeline(),
             waiting_on=tuple(
                 sorted(
                     set(self._unmet_to_start())
