@@ -1,0 +1,35 @@
+src/concert/core/classify.py
+  s_f3f5335312522f::t_8ae72a4512938f 1-23
+src/concert/core/commands.py
+  s_f3f5335312522f::t_f7119e24771e34 95-97,180
+src/concert/core/decide.py
+  s_f3f5335312522f::t_67e2d3189b0097 340-348,358-360
+src/concert/core/derive.py
+  s_f3f5335312522f::t_bf5163d9671a59 347-355
+src/concert/core/evidence.py
+  s_f3f5335312522f::t_1ff6c140e9247a 79-80
+src/concert/core/transitions.py
+  s_f3f5335312522f::t_d1ff05a36f0109 67,165-174,179
+src/concert/runner/config.py
+  s_f3f5335312522f::t_57a430e990d637 15,54-61,97
+src/concert/runner/poll.py
+  s_f3f5335312522f::t_1f21b4863ecca5 18,107,227,714-742
+tests/runner/test_docs_type.py
+  s_f3f5335312522f::t_0fca2a07a8d720 1-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7a34276f68e239fd98e28e2865123dc6bcdddd50",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
