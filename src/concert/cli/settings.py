@@ -16,6 +16,14 @@ class SettingsError(Exception):
     pass
 
 
+# How the agent signs in. An API key is the default: usage is billed to the key's owner, which
+# the terms expect of automated use, and it can be capped. A subscription token is opt-in. Only
+# one of the two is ever passed to the sandbox, because Claude Code prefers an API key over the
+# token and would otherwise bill the key without being asked.
+_CREDENTIALS = {"api_key": "ANTHROPIC_API_KEY", "oauth_token": "CLAUDE_CODE_OAUTH_TOKEN"}
+_DEFAULT_BUDGET_USD = 5.0
+
+
 @dataclass(frozen=True)
 class AppCredentials:
     app_id: int
@@ -37,6 +45,13 @@ class Settings:
     agent_timeout: int
     docker: DockerSpec
     steering_issue: int | None = None
+    agent_auth: str = "api_key"
+    max_budget_usd: float | None = None
+
+    @property
+    def agent_credential(self) -> str:
+        """The one environment variable that carries the agent's credential into the sandbox."""
+        return _CREDENTIALS[self.agent_auth]
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> "Settings":
@@ -82,12 +97,17 @@ class Settings:
             )
         interval = number("CONCERT_INTERVAL", 20)
         timeout = number("CONCERT_AGENT_TIMEOUT", 3600)
+        agent_auth = env.get("CONCERT_AGENT_AUTH", "api_key")
+        if agent_auth not in _CREDENTIALS:
+            problems.append(f"CONCERT_AGENT_AUTH must be one of: {', '.join(_CREDENTIALS)}")
+            agent_auth = "api_key"
+        budget = _budget(env.get("CONCERT_AGENT_MAX_BUDGET_USD"), problems)
         docker = DockerSpec(
             image=env.get("CONCERT_DOCKER_IMAGE", "concert-agent:latest"),
             network=env.get("CONCERT_DOCKER_NETWORK", "concert-egress"),
             proxy_url=env.get("CONCERT_PROXY_URL", "http://172.20.0.1:3128"),
             runtime=env.get("CONCERT_DOCKER_RUNTIME", "runsc"),
-            passthrough_env=("ANTHROPIC_API_KEY",),
+            passthrough_env=(_CREDENTIALS[agent_auth],),
         )
         steering = (
             number("CONCERT_STEERING_ISSUE", 0) or None if "CONCERT_STEERING_ISSUE" in env else None
@@ -107,4 +127,21 @@ class Settings:
             agent_timeout=timeout,
             docker=docker,
             steering_issue=steering,
+            agent_auth=agent_auth,
+            max_budget_usd=budget
+            if agent_auth == "api_key"
+            else None,  # meaningless on a flat plan
         )
+
+
+def _budget(raw: str | None, problems: list[str]) -> float:
+    if raw is None:
+        return _DEFAULT_BUDGET_USD
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 0.0
+    if not value > 0:  # also rejects nan
+        problems.append("CONCERT_AGENT_MAX_BUDGET_USD must be a positive number")
+        return _DEFAULT_BUDGET_USD
+    return value

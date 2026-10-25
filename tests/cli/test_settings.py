@@ -82,3 +82,32 @@ def test_the_steering_issue_is_optional_and_numeric() -> None:
     assert Settings.from_env(ENV | {"CONCERT_STEERING_ISSUE": "3"}).steering_issue == 3
     with pytest.raises(SettingsError, match="CONCERT_STEERING_ISSUE"):
         Settings.from_env(ENV | {"CONCERT_STEERING_ISSUE": "x"})
+
+
+def test_the_default_is_an_api_key_with_a_spend_cap() -> None:
+    s = Settings.from_env(ENV)
+    assert s.agent_auth == "api_key" and s.agent_credential == "ANTHROPIC_API_KEY"
+    assert s.max_budget_usd == 5.0
+    assert Settings.from_env(ENV | {"CONCERT_AGENT_MAX_BUDGET_USD": "0.75"}).max_budget_usd == 0.75
+
+
+def test_a_subscription_token_is_opt_in_and_the_only_credential_the_sandbox_gets() -> None:
+    """Claude Code prefers an API key over the token, so passing both could bill the key by surprise."""
+    s = Settings.from_env(ENV | {"CONCERT_AGENT_AUTH": "oauth_token"})
+    assert s.agent_credential == "CLAUDE_CODE_OAUTH_TOKEN"
+    assert s.docker.passthrough_env == ("CLAUDE_CODE_OAUTH_TOKEN",)
+    assert s.max_budget_usd is None  # a dollar cap means nothing on a flat plan
+
+
+@pytest.mark.parametrize(
+    ("change", "text"),
+    [
+        ({"CONCERT_AGENT_AUTH": "password"}, "CONCERT_AGENT_AUTH"),
+        ({"CONCERT_AGENT_MAX_BUDGET_USD": "free"}, "CONCERT_AGENT_MAX_BUDGET_USD"),
+        ({"CONCERT_AGENT_MAX_BUDGET_USD": "0"}, "CONCERT_AGENT_MAX_BUDGET_USD"),
+        ({"CONCERT_AGENT_MAX_BUDGET_USD": "-3"}, "CONCERT_AGENT_MAX_BUDGET_USD"),
+    ],
+)
+def test_bad_agent_auth_settings_are_refused(change: dict[str, str], text: str) -> None:
+    with pytest.raises(SettingsError, match=text):
+        Settings.from_env(ENV | change)

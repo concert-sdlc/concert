@@ -25,10 +25,17 @@ _BODY_LIMIT = 20_000
 
 
 class ClaudeCodeAgent:
-    def __init__(self, executor: Executor, model: str, timeout: float) -> None:
+    def __init__(
+        self,
+        executor: Executor,
+        model: str,
+        timeout: float,
+        max_budget_usd: float | None = None,
+    ) -> None:
         self.executor = executor
         self.model = model
         self.timeout = timeout
+        self.max_budget_usd = max_budget_usd  # a per-run spend cap; None on a flat plan
 
     def run(self, task: AgentTask) -> AgentResult:
         workdir = Path(tempfile.mkdtemp(prefix=f"concert-{task.run_id}-"))
@@ -51,7 +58,9 @@ class ClaudeCodeAgent:
             "--output-format",
             "json",
             "--dangerously-skip-permissions",
-        ]  # the container is the permission boundary
+        ]  # the container is the permission boundary; never --bare, it ignores the OAuth token
+        if self.max_budget_usd is not None:
+            command += ["--max-budget-usd", f"{self.max_budget_usd:g}"]
         done = self.executor.execute(command, workdir, f"concert-{task.run_id}", self.timeout)
         if done.timed_out:
             raise AgentFailure("the run timed out")

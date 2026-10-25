@@ -59,7 +59,10 @@ def test_wiring_builds_a_service_without_touching_the_network(tmp_path: Path) ->
 
 
 def test_a_missing_key_file_is_reported_as_a_settings_problem(tmp_path: Path) -> None:
-    env = env_for(tmp_path) | {"CONCERT_PM_KEY": str(tmp_path / "nope.pem")}
+    env = env_for(tmp_path) | {
+        "CONCERT_PM_KEY": str(tmp_path / "nope.pem"),
+        "ANTHROPIC_API_KEY": "sk-test",
+    }
     err = io.StringIO()
     assert main(["run", "--once"], env=env, transport=Offline(), stderr=err) == 2
     assert "nope.pem" in err.getvalue()
@@ -206,3 +209,13 @@ def test_the_watchdog_needs_its_token_and_arguments() -> None:
     assert main(args, env={}, stderr=err) == 2 and "GITHUB_TOKEN" in err.getvalue()
     err = io.StringIO()
     assert main(["watchdog", "--repo", "bad"], env={"GITHUB_TOKEN": "x"}, stderr=err) == 2
+
+
+def test_a_missing_agent_credential_stops_the_run_before_anything_starts(tmp_path: Path) -> None:
+    err = io.StringIO()
+    code = main(["run", "--once"], env=env_for(tmp_path), transport=Offline(), stderr=err)
+    assert code == 2 and "ANTHROPIC_API_KEY" in err.getvalue()
+    err = io.StringIO()
+    env = env_for(tmp_path) | {"CONCERT_AGENT_AUTH": "oauth_token", "ANTHROPIC_API_KEY": "sk-x"}
+    assert main(["run", "--once"], env=env, transport=Offline(), stderr=err) == 2
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in err.getvalue()  # the API key does not stand in for it

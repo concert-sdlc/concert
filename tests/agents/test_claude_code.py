@@ -202,3 +202,14 @@ def test_no_answers_section_when_nobody_answered() -> None:
     executor = FakeExecutor(None, {"exit": "done"})
     agent(executor).run(task())
     assert "Answers from" not in executor.calls[0][0][executor.calls[0][0].index("-p") + 1]
+
+
+def test_a_budget_cap_is_passed_to_claude_and_absent_when_unset() -> None:
+    capped = FakeExecutor(result={"exit": "done"})
+    ClaudeCodeAgent(capped, model="m", timeout=60, max_budget_usd=2.5).run(task())
+    command = capped.calls[0][0]
+    assert command[command.index("--max-budget-usd") + 1] == "2.5"
+    uncapped = FakeExecutor(result={"exit": "done"})
+    ClaudeCodeAgent(uncapped, model="m", timeout=60).run(task())
+    assert "--max-budget-usd" not in uncapped.calls[0][0]
+    assert "--bare" not in command  # bare mode ignores CLAUDE_CODE_OAUTH_TOKEN

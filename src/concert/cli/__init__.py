@@ -43,6 +43,10 @@ def main(
         return _watchdog(args, environment, err, stdout or sys.stdout, watchdog_runner, clock)
     try:
         settings = Settings.from_env(environment)
+        if service_factory is None and not environment.get(settings.agent_credential):
+            raise SettingsError(
+                f"{settings.agent_credential} is not set (CONCERT_AGENT_AUTH={settings.agent_auth})"
+            )
         service = (
             service_factory(settings)
             if service_factory is not None

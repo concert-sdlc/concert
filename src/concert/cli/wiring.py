@@ -24,6 +24,7 @@ def build_service(settings: Settings, transport: Transport, clock: Callable[[], 
         DockerExecutor(settings.docker, environ=dict(os.environ)),
         model=settings.model,
         timeout=settings.agent_timeout,
+        max_budget_usd=settings.max_budget_usd,
     )
     # the real identities (bot user ids) come from process.yaml on every tick
     unknown = Identity(user_id=0, login="unconfigured", is_bot=True)

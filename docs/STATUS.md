@@ -52,5 +52,21 @@ re-landing, freeze, hotfixes, `needs_input`, dependencies, close/reopen, duplica
 
 `CONCERT_REPO`, `CONCERT_RUNNER`, `CONCERT_{PM,WORKER}_{APP_ID,INSTALLATION_ID,KEY}`,
 optional `CONCERT_BASE_BRANCH`, `CONCERT_INTERVAL`, `CONCERT_BOARD_{OWNER,NUMBER}`, `CONCERT_MODEL`,
-`CONCERT_DOCKER_{IMAGE,NETWORK,RUNTIME}`, `CONCERT_PROXY_URL`, `ANTHROPIC_API_KEY` (passed into the
-sandbox by name only).
+`CONCERT_DOCKER_{IMAGE,NETWORK,RUNTIME}`, `CONCERT_PROXY_URL`, `CONCERT_STEERING_ISSUE`.
+
+### How the agent signs in
+
+| `CONCERT_AGENT_AUTH` | Credential passed into the sandbox (by name only) | Spend control |
+|---|---|---|
+| `api_key` (default) | `ANTHROPIC_API_KEY` | `CONCERT_AGENT_MAX_BUDGET_USD` per run (default 5); set a monthly limit on the key's Console workspace too |
+| `oauth_token` | `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` | none: the plan's own quota applies and is shared with your interactive use |
+
+Exactly one credential reaches the sandbox: Claude Code prefers an API key over the token, so
+passing both would bill the key without being asked. `concert run` refuses to start when the chosen
+variable is unset. Never run with `--bare`: it ignores the OAuth token.
+
+Anthropic's terms (checked 2026-10-25, code.claude.com/docs/en/legal-and-compliance) say Pro and Max
+limits "assume ordinary, individual usage", that products and services should use API keys, and that
+plan credentials must not be routed or intermediated on behalf of others. A subscription token for
+your own scripts is documented, but whether an always-on autonomous runner counts as ordinary use is
+not settled; `oauth_token` is therefore off by default and your own risk. Ask Anthropic if unsure.
