@@ -125,18 +125,36 @@ by an admin when workflows change (`run_init` has no CLI command yet and was not
 
 ## 3. One agent run
 
-Needs Docker with gVisor (`runsc`), the `concert-agent` image (`ops/agent/build.sh`, which also
-checks the restrictions the sandbox applies), the egress proxy and the agent credential
-(`ANTHROPIC_API_KEY`, or `CLAUDE_CODE_OAUTH_TOKEN` with `CONCERT_AGENT_AUTH=oauth_token`). On the runner host (`docs/runner-host.md`), as the `concert` user:
+The sandbox is a container on an internal Docker network whose only neighbour is the egress proxy
+(also a container). Set it up once; `check.sh` proves it from inside an agent container:
 
 ```bash
-uv run concert proxy --listen 172.20.0.1:3128 --allow api.anthropic.com,github.com &
-uv run concert run --once      # with a tiny issue already at `implementing`
+ops/agent/build.sh                 # the agent image (pinned Claude Code), with its own checks
+ops/egress/setup.sh                # network `concert-egress` and the proxy `concert-proxy`
+ops/egress/check.sh                # allowed host reachable; others, IP literals, other ports, a
+                                   # direct route and the metadata address all refused
 ```
 
-Checks: the agent container starts under `runsc`; it reaches only the allowed hosts (try a denied
-host from inside); the key is not in the container's environment dump; a WIP ref and a handoff
-appear; no workflow file is ever pushed. Only then run the Friday test on the real project.
+Run the runner with the runtime and network for this host (`runc` is acceptable where the host is
+already a separate Linux kernel, as Colima's VM is; use `runsc` when gVisor is installed):
+
+```bash
+source ~/.concert-live/env
+source ~/.concert-live/anthropic.env        # export ANTHROPIC_API_KEY=... (mode 600)
+export CONCERT_DOCKER_RUNTIME=runc CONCERT_DOCKER_NETWORK=concert-egress
+export CONCERT_PROXY_URL=http://concert-proxy:3128 CONCERT_AGENT_MAX_BUDGET_USD=2
+uv run concert run --once        # repeat until the issue moves; or without --once to loop
+```
+
+Start with one tiny issue in the throwaway repo and the Steering issue in place. Checks: the agent
+container starts and is removed; it reaches only `api.anthropic.com`; a WIP ref and a handoff
+appear; no workflow file is ever pushed; the cost reported for the run stays under the cap. Only
+then run the Friday test on the real project.
+
+Verified without a model (2026-10-25, OrbStack, `runc`): the image builds and passes its checks,
+`ops/egress/check.sh` passes 6 of 6, and `DockerExecutor` runs a command as uid 10001 with only the
+run directory mounted and writable. Not yet verified: the same on the Colima VM (file ownership on
+its mount), and any model run.
 
 ## Record the result
 
