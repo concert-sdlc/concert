@@ -1,8 +1,8 @@
 # Status
 
 Milestone 1 (the "Friday test"): one runner, one adopted project. Everything below is covered by
-tests that run against an in-memory fake of GitHub; **nothing has been run against real GitHub,
-Docker or a model yet**. That is the first thing to do with credentials in hand.
+tests that run against an in-memory fake of GitHub; **real GitHub was exercised on 2026-10-25** (11 live contract tests,
+see [LIVE_VALIDATION.md](LIVE_VALIDATION.md)); nothing has run against Docker or a model yet.
 
 ## Built
 
