@@ -1,0 +1,45 @@
+src/concert/agents/claude_code.py
+  s_f3f5335312522f::t_0e344c90b4c605 90-92,142,147-162
+src/concert/agents/skills/_contract.md
+  s_f3f5335312522f::t_cda71d453eba40 9-15
+src/concert/core/admin.py
+  s_f3f5335312522f::t_a3decee720d85e 81,93,112-113,116-118
+src/concert/core/commands.py
+  s_f3f5335312522f::t_ef12cbffbd0b23 68-78,134-144,229-230
+src/concert/core/decide.py
+  s_f3f5335312522f::t_f5f12bd4309e31 62-63,302-314,345-347
+src/concert/core/derive.py
+  s_f3f5335312522f::t_90e4cc45393123 40-41,121-122,312-319,321-325
+src/concert/core/lessons.py
+  s_f3f5335312522f::t_9a8223b857a7cc 1-152
+src/concert/core/metrics.py
+  s_f3f5335312522f::t_87a247dc1efd02 78,93,154-155,170,221,237
+src/concert/runner/admin.py
+  s_f3f5335312522f::t_f51d024b9d2809 51,54-78
+src/concert/runner/digest.py
+  s_f3f5335312522f::t_ea266a100940b8 52
+src/concert/runner/service.py
+  s_f3f5335312522f::t_86b974d49134c1 110-113
+src/concert/runner/worker.py
+  s_f3f5335312522f::t_be2e7a4f114fd5 19,48,58-60,183,215-217
+tests/core/test_lessons.py
+  s_f3f5335312522f::t_b536530c5e8cf2 1-106
+tests/runner/test_lessons.py
+  s_f3f5335312522f::t_c0cae1b4bb0679 1-124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9847ce56b489935e5871a0ba7c651ada58d733ed",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
