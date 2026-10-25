@@ -78,6 +78,7 @@ class AdminState:
     resets: Mapping[int, Status] = field(default_factory=dict[int, Status])
     consumed: frozenset[int] = frozenset()  # comment ids already handled
     blocked: str | None = None  # the Steering history cannot be trusted: everything waits
+    lessons: tuple[str, ...] = ()  # lessons proposed in Steering, oldest first
 
     def holds(self, issue: int) -> bool:
         """New work (runs, merges) for this issue waits."""
@@ -89,6 +90,7 @@ def fold_admin(events: Sequence[Mapping[str, Any]]) -> AdminState:
     paused_issues: set[int] = set()
     resets: dict[int, Status] = {}
     consumed: set[int] = set()
+    lessons: list[str] = []
     for event in events:
         data = cast("Mapping[str, Any]", event.get("data") or {})
         kind = event.get("kind")
@@ -107,6 +109,10 @@ def fold_admin(events: Sequence[Mapping[str, Any]]) -> AdminState:
                     paused_issues.discard(int(issue))
             elif command == "reset" and issue is not None:
                 resets[int(issue)] = Status(str(data["state"]))
+            elif command == "lesson":
+                lessons.append(str(data["text"]))
         elif kind == "admin_reset_applied":
             resets.pop(int(data["issue"]), None)
-    return AdminState(paused, frozenset(paused_issues), resets, frozenset(consumed))
+    return AdminState(
+        paused, frozenset(paused_issues), resets, frozenset(consumed), lessons=tuple(lessons)
+    )

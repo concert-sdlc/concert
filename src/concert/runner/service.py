@@ -107,6 +107,10 @@ class Service:
                 items.append(f"#{number} is blocked: {state.blocked_reason or state.note or '?'}")
             for dependency in state.dependencies:
                 items.append(f"#{number} is waiting on #{dependency.issue} ({dependency.kind})")
+        proposed = sum(len(state.lessons_proposed) for state in self._known.values())
+        proposed += len(self._admin.lessons)
+        if proposed:
+            items.append(f"{proposed} lesson proposal(s) wait for an admin to curate")
         for runner in config.runners:
             beat = read_heartbeat(self.pm_github, runner.name)
             if beat is None:

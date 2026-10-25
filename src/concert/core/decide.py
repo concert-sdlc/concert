@@ -59,6 +59,8 @@ class Answer:
 
 
 _ANSWER_LIMIT = 8_000
+_LESSONS = 20  # lessons (and plan deviations) taken from one run
+_LESSON_TEXT = 1_000
 
 
 @dataclass(frozen=True)
@@ -297,17 +299,19 @@ def _run_evidence(item: AcceptedHandoff) -> list[Proposed]:
 
 def _accepted(item: AcceptedHandoff) -> Proposed:
     handoff = item.handoff
-    return Proposed(
-        "handoff_accepted",
-        {
-            "run_id": handoff.run_id,
-            "state": handoff.state.value,
-            "commit_sha": handoff.commit_sha,
-            "artifact_rev": handoff.artifact_rev,
-            "doubts": list(handoff.doubts),
-            "decisions": list(handoff.decisions),
-        },
-    )
+    data: dict[str, Any] = {
+        "run_id": handoff.run_id,
+        "state": handoff.state.value,
+        "commit_sha": handoff.commit_sha,
+        "artifact_rev": handoff.artifact_rev,
+        "doubts": list(handoff.doubts),
+        "decisions": list(handoff.decisions),
+    }
+    if handoff.lessons_proposed:  # recorded only when present, so ordinary events stay small
+        data["lessons_proposed"] = [t[:_LESSON_TEXT] for t in handoff.lessons_proposed[:_LESSONS]]
+    if handoff.plan_deviations:
+        data["plan_deviations"] = list(handoff.plan_deviations[:_LESSONS])
+    return Proposed("handoff_accepted", data)
 
 
 # --- commands --------------------------------------------------------------------------------
@@ -338,6 +342,9 @@ def _from_commands(state: IssueState, commands: Sequence[ValidCommand]) -> list[
             typed = Proposed("issue_typed", {"issue_type": IssueType.HOTFIX.value})
             hotfix = replace(state, issue_type=IssueType.HOTFIX)
             return [passage, typed, *_trigger_events(hotfix, Trigger.DISPATCH)]
+        if item.command.verb == "lesson":
+            note = {"text": item.command.arg.strip(), "author_id": item.actor.user_id}
+            return [passage, Proposed("lesson_proposed", note | {"source": "human"})]
         if state.status is Status.BLOCKED and item.command.verb == "unblock":
             return [passage, *_unblock_events(item.command.arg.strip())]
         if (state.status, item.command.verb, item.command.kind) in _APPROVALS:

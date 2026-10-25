@@ -75,6 +75,7 @@ class Observation:
     merged_at: int | None  # the first time the PM merged it to staging
     reverted: bool  # a merge of this issue was auto-reverted
     revert_events: int
+    plan_deviations: int  # deviations from the spec that reviewers reported
     approvals: int  # human approvals of the UAT gate
     ci_runs: int
     interventions: int  # commands that moved the issue (dispatch, approve, reject, unblock...)
@@ -89,7 +90,7 @@ def observe(issue: int, timed: Sequence[Timed], status: str = "") -> Observation
     merged_at: int | None = None
     reverted = False
     revert_events = 0
-    approvals = ci_runs = interventions = 0
+    approvals = ci_runs = interventions = plan_deviations = 0
     gate: tuple[str, int] | None = None
     waits: list[int] = []
     last_status = status
@@ -150,6 +151,8 @@ def observe(issue: int, timed: Sequence[Timed], status: str = "") -> Observation
             if action == "merge_revert" and result.get("sha"):
                 revert_events += 1
                 reverted = True
+        elif kind == "handoff_accepted":
+            plan_deviations += len(data.get("plan_deviations", ()))
         elif kind == "evidence":
             if data.get("kind") == "approval" and data.get("item") == "uat":
                 approvals += 1
@@ -164,6 +167,7 @@ def observe(issue: int, timed: Sequence[Timed], status: str = "") -> Observation
         merged_at=merged_at,
         reverted=reverted,
         revert_events=revert_events,
+        plan_deviations=plan_deviations,
         approvals=approvals,
         ci_runs=ci_runs,
         interventions=interventions,
@@ -214,6 +218,7 @@ class Digest:
     repeat_approvals_per_issue: float | None
     gate_wait_median: int | None
     gate_wait_p95: int | None
+    plan_deviations: int = 0
 
 
 def compute(observations: Sequence[Observation], now: int) -> Digest:
@@ -229,6 +234,7 @@ def compute(observations: Sequence[Observation], now: int) -> Digest:
         repeat_approvals_per_issue=_mean([max(0, o.approvals - 1) for o in real if o.approvals]),
         gate_wait_median=_median([w for o in real for w in o.gate_waits]),
         gate_wait_p95=_percentile([w for o in real for w in o.gate_waits], 95),
+        plan_deviations=sum(o.plan_deviations for o in real),
     )
 
 

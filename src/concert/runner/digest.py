@@ -49,6 +49,7 @@ def render_digest(digest: Digest, attention: Sequence[str] = ()) -> str:
             f"p95 {_duration(digest.gate_wait_p95)}"
         ),
         f"- CI runs per completed issue: {_number(digest.ci_runs_per_issue)}",
+        f"- plan deviations reported by reviewers: {digest.plan_deviations}",
     ]
     if attention:
         lines += ["", "### Needs attention", *(f"- {item}" for item in attention)]

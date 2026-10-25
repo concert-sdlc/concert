@@ -65,7 +65,17 @@ class Rejected:
 
 
 _VERBS = frozenset(
-    {"dispatch", "approve", "reject", "unblock", "answer", "depends-on", "drop-dependency", "pm"}
+    {
+        "dispatch",
+        "approve",
+        "reject",
+        "unblock",
+        "answer",
+        "depends-on",
+        "drop-dependency",
+        "pm",
+        "lesson",
+    }
 )
 
 
@@ -119,6 +129,17 @@ def _no_argument(command: Command, _context: IssueContext) -> str | None:
 
 def _text_required(command: Command, _context: IssueContext) -> str | None:
     return None if command.arg.strip() else "the answer text is required"
+
+
+LESSON_LIMIT = 2_000
+
+
+def _lesson_text(command: Command, _context: IssueContext) -> str | None:
+    if not command.arg.strip():
+        return "write the lesson after /lesson"
+    if len(command.arg) > LESSON_LIMIT:
+        return f"a lesson is at most {LESSON_LIMIT} characters"
+    return None
 
 
 def _unblock_target(command: Command, context: IssueContext) -> str | None:
@@ -205,6 +226,8 @@ def _rule(command: Command) -> _Rule | None:
         return _Rule(Role.APPROVER, _unblock_target, frozenset({_S.BLOCKED}))
     if verb == "answer":
         return _Rule(Role.CONTRIBUTOR, _text_required, frozenset({_S.NEEDS_INPUT}))
+    if verb == "lesson":
+        return _Rule(Role.CONTRIBUTOR, _lesson_text)
     if verb in ("depends-on", "drop-dependency"):
         return _Rule(Role.APPROVER, _issue_reference)
     if verb == "pm":

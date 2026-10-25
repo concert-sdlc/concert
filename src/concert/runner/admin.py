@@ -48,9 +48,34 @@ def process_steering(
     state = fold_admin(trusted.events)
     chain = [parse_event(e) for e in trusted.events]
     for item in extract_commands(comments, config.roles):
-        if item.command.verb != "pm" or item.comment_id in state.consumed:
+        if item.command.verb not in ("pm", "lesson") or item.comment_id in state.consumed:
             continue
         verdict = validate_command(item.command, item.actor, item.facts, _CONTEXT)
+        if item.command.verb == "lesson":
+            if isinstance(verdict, Valid):
+                data = {
+                    "comment_id": item.comment_id,
+                    "author_id": item.actor.user_id,
+                    "command": "lesson",
+                    "text": item.command.arg.strip(),
+                }
+                reply = "Lesson noted. It is kept with the proposals until an admin merges it."
+            else:
+                data = {
+                    "comment_id": item.comment_id,
+                    "author_id": item.actor.user_id,
+                    "command": "refused",
+                    "reason": verdict.reason,
+                }
+                reply = f"Not done: {verdict.reason}."
+            event = append_event(chain, epoch=config.epoch, kind="admin_command", data=data)
+            publish_events(github, mirror, steering, [event])
+            chain.append(event)
+            github.add_comment(steering, reply)
+            state = fold_admin(
+                [*trusted.events, *(e.to_dict() for e in chain[len(trusted.events) :])]
+            )
+            continue
         parsed = parse_admin(item.command.arg) if isinstance(verdict, Valid) else None
         data: dict[str, object] = {"comment_id": item.comment_id, "author_id": item.actor.user_id}
         if not isinstance(verdict, Valid):

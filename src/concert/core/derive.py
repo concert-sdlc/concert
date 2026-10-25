@@ -37,6 +37,8 @@ DEFAULT_BUDGET = 4
 # Moving back to the spec or to its approval gate voids the approval.
 _UNAPPROVED_TARGETS = frozenset({Status.INBOX, Status.SPEC, Status.SPEC_APPROVAL})
 
+MAX_LESSONS = 100  # proposals kept per issue; the oldest fall off
+
 # Event kinds that are part of the log but do not change status or counters.
 _RECORD_ONLY = frozenset({"assignment", "reconciled", "admin_command"})
 
@@ -116,6 +118,8 @@ class IssueState:
     refresh_result: str | None = None  # "clean" or "conflict" until the issue has moved on
     refresh_note: str | None = None  # the conflicting paths
     pm_commits: tuple[str, ...] = ()  # commits the PM itself made on the issue branch (rebases)
+    lessons_proposed: tuple[str, ...] = ()  # lessons suggested by humans and agents, newest last
+    plan_deviations: int = 0  # deviations from the plan that reviewers reported
     revert_ci_reruns: int = 0  # times CI was run again on the revert PR after a failure
     revert_ci_rerun_at: int | None = None  # when, so the failed run is not read as the new one
     dispatched: frozenset[str] = frozenset()  # keys of the CI dispatches already made
@@ -305,7 +309,20 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             state = replace(state, spec_rev=str(data["artifact_rev"]))
         if data.get("commit_sha") is not None:
             state = replace(state, head_sha=str(data["commit_sha"]))
+        proposed = tuple(str(t) for t in data.get("lessons_proposed", ()))
+        deviations = len(tuple(data.get("plan_deviations", ())))
+        if proposed or deviations:
+            state = replace(
+                state,
+                lessons_proposed=(*state.lessons_proposed, *proposed)[-MAX_LESSONS:],
+                plan_deviations=state.plan_deviations + deviations,
+            )
         return state
+    if kind == "lesson_proposed":
+        return replace(
+            state,
+            lessons_proposed=(*state.lessons_proposed, str(event.data["text"]))[-MAX_LESSONS:],
+        )
     if kind == "admin_reset":
         target = Status(event.data["to"])
         if is_terminal(state.status):

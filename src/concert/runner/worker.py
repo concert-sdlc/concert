@@ -16,6 +16,7 @@ from typing import Protocol
 
 from concert.core.derive import ActiveRun, derive
 from concert.core.handoff import RunState
+from concert.core.lessons import Lesson, load_lessons, select_lessons
 from concert.core.paths import WORKFLOW_PATHS, matches_any
 from concert.core.spec_hash import spec_tree_hash
 from concert.github.api import BinaryBlob, GitHubApi, GitHubError, Identity
@@ -44,6 +45,7 @@ class AgentTask:
     spec_rev: str | None
     approved_spec_rev: str | None
     answers: tuple[str, ...] = ()  # trusted humans' replies to earlier questions, oldest first
+    lessons: tuple[Lesson, ...] = ()  # accepted lessons that apply to this run, best first
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,9 @@ class AgentResult:
     produced: tuple[str, ...] = ()
     decisions: tuple[str, ...] = ()
     doubts: tuple[str, ...] = ()
+    lessons_applied: tuple[str, ...] = ()  # ids of the lessons the run followed
+    lessons_proposed: tuple[str, ...] = ()  # what the run learned that the next one should know
+    plan_deviations: tuple[str, ...] = ()  # reviewers: where the change departs from the spec
 
 
 class QuotaPause(Exception):
@@ -175,6 +180,7 @@ class Worker:
             spec_rev=spec_rev,
             approved_spec_rev=approved,
             answers=answers,
+            lessons=tuple(select_lessons(load_lessons(tree)[0], run.state, tree.keys())),
         )
         with self._beating(run.run_id):
             result = self.agent.run(task)
@@ -206,6 +212,9 @@ class Worker:
             "produced": _fit(result.produced),
             "decisions": _fit(result.decisions),
             "doubts": _fit(result.doubts),
+            "lessons_applied": _fit(result.lessons_applied),
+            "lessons_proposed": _fit(result.lessons_proposed),
+            "plan_deviations": _fit(result.plan_deviations),
             "run_commits": list(commits),
             "reviewer": run.reviewer,
             "workflow_change_request": proposed,
