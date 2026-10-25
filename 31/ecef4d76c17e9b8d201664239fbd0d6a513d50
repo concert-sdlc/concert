@@ -1,0 +1,71 @@
+ops/agent/Dockerfile
+  s_f3f5335312522f::t_d42a3262d470fb 12-13,15-16
+ops/agent/build.sh
+  s_f3f5335312522f::t_04d7a6f99b0efa 3,6
+src/concert/adopt/plan.py
+  s_f3f5335312522f::t_c0d22dccbef358 173
+src/concert/agents/claude_code.py
+  s_f3f5335312522f::t_45bf05912b744d 97,111-115,126-141
+src/concert/cli/adopting.py
+  s_f3f5335312522f::t_6cf1e83db0b1d8 6,9-10,31,95,106-113,119-121,127-147
+src/concert/core/admin.py
+  s_f3f5335312522f::t_a8dce4f17493c2 74-76,120-124
+src/concert/core/ci.py
+  s_f3f5335312522f::t_02d98d34c8a684 21
+src/concert/core/decide.py
+  s_f3f5335312522f::t_78d7a8ef37f052 504-505,521-534,541-542
+src/concert/core/derive.py
+  s_f3f5335312522f::t_7646bae8ce1a8c 117,460-461,482-483,499
+src/concert/core/effects.py
+  s_f3f5335312522f::t_ffa577954f1a07 51,96,130,150
+src/concert/core/kits.py
+  s_f3f5335312522f::t_513a0707e2eb84 26-28
+src/concert/github/rest.py
+  s_f3f5335312522f::t_b52ca8aaaa4d8f 387-389
+src/concert/runner/config.py
+  s_f3f5335312522f::t_62294fee6a76c6 54-56,100
+src/concert/runner/digest.py
+  s_f3f5335312522f::t_c61e9b6f75651d 35,37-39
+src/concert/runner/poll.py
+  s_f3f5335312522f::t_1a037a2302de26 60,111,601,774-782,791-792,878-893,904-912
+src/concert/runner/service.py
+  s_f3f5335312522f::t_5e54b7bdabfd20 23,46-47,55,97-98,101,103
+src/concert/runner/worker.py
+  s_f3f5335312522f::t_c355a4a6e04572 98,118-121,128,144-145
+tests/agents/test_quota.py
+  s_f3f5335312522f::t_8fbefbe59f4290 71-89
+tests/cli/test_adopt_cli.py
+  s_f3f5335312522f::t_c3b1501931b5fc 120-147
+tests/core/test_metrics.py
+  s_f3f5335312522f::t_09d58846868fe6 35-40,136,141-142
+tests/fakes/github.py
+  s_f3f5335312522f::t_df21ed224bec43 75-76,369
+tests/runner/test_digest.py
+  s_f3f5335312522f::t_c52f5321b83b2e 3-6,69-95
+tests/runner/test_lessons.py
+  s_f3f5335312522f::t_40774b81f9117d 139-150
+tests/runner/test_quota.py
+  s_f3f5335312522f::t_704c9d1e5108ef 93-94,101-118
+tests/runner/test_refresh.py
+  s_f3f5335312522f::t_27c985781be12c 154-235
+tests/runner/test_revert.py
+  s_f3f5335312522f::t_0a5cabcaa6426a 281-308
+tests/runner/test_workflow_type.py
+  s_f3f5335312522f::t_5b9d9dbeb01985 152-159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "31ecef4d76c17e9b8d201664239fbd0d6a513d50",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
