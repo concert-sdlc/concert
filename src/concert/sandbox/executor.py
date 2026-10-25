@@ -73,6 +73,8 @@ def docker_argv(spec: DockerSpec, workdir: Path, command: list[str], name: str) 
     ]
 
 
+_CLI_ENV = ("PATH", "HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG")
+
 Run = Callable[[list[str], dict[str, str], float], "subprocess.CompletedProcess[str]"]
 
 
@@ -103,7 +105,10 @@ class DockerExecutor:
 
     def execute(self, command: list[str], workdir: Path, name: str, timeout: float) -> ExecResult:
         args = docker_argv(self.spec, workdir, command, name)
-        env = {k: self._environ[k] for k in self.spec.passthrough_env if k in self._environ}
+        # What the docker CLI needs to find itself, its context and its daemon, then the named
+        # secrets: nothing else from the runner's environment reaches the child.
+        wanted = (*_CLI_ENV, *self.spec.passthrough_env)
+        env = {k: self._environ[k] for k in wanted if k in self._environ}
         try:
             done = self._run(args, env, timeout)
         except subprocess.TimeoutExpired:

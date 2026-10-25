@@ -91,12 +91,15 @@ def test_the_executor_passes_secrets_through_the_environment_not_argv() -> None:
     done = subprocess.CompletedProcess([], 0, stdout="out", stderr="err")
     recorder = Recorder(done)
     executor = DockerExecutor(
-        SPEC, run=recorder, environ={"ANTHROPIC_API_KEY": "sk-secret", "HOME": "/h"}
+        SPEC,
+        run=recorder,
+        environ={"ANTHROPIC_API_KEY": "sk-secret", "HOME": "/h", "GITHUB_TOKEN": "ghs_other"},
     )
     result = executor.execute(["claude"], Path("/tmp/w"), "concert-r-2", timeout=30)
     assert result == ExecResult(0, "out", "err", timed_out=False)
     args, env, timeout = recorder.calls[0]
-    assert env["ANTHROPIC_API_KEY"] == "sk-secret" and "HOME" not in env
+    assert env["ANTHROPIC_API_KEY"] == "sk-secret" and env["HOME"] == "/h"
+    assert "GITHUB_TOKEN" not in env  # only the CLI's own variables and the named secrets
     assert "sk-secret" not in " ".join(args) and timeout == 30
 
 

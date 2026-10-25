@@ -8,6 +8,7 @@ bytes are piped both ways. Anything but CONNECT is refused, and every decision i
 
 import asyncio
 import socket
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
@@ -17,6 +18,7 @@ Connect = Callable[[str, int], Awaitable[tuple[asyncio.StreamReader, asyncio.Str
 
 _MAX_HEAD = 8_192
 _IDLE_SECONDS = 300
+_MAX_LOG = 1_000  # recent decisions kept for inspection; the proxy runs for weeks
 
 
 @dataclass(frozen=True)
@@ -38,7 +40,7 @@ class EgressProxy:
     allowlist: Allowlist
     resolve: Callable[[str], list[str]] = system_resolve
     connect: Connect = asyncio.open_connection
-    decisions: list[Logged] = field(default_factory=list[Logged])
+    decisions: deque[Logged] = field(default_factory=lambda: deque[Logged](maxlen=_MAX_LOG))
     _server: asyncio.Server | None = None
 
     async def start(self, host: str = "127.0.0.1", port: int = 0) -> tuple[str, int]:
@@ -85,7 +87,10 @@ class EgressProxy:
             addresses.extend(self.resolve(name))
             return addresses
 
-        decision = check_connect(host, port, self.allowlist, resolver)
+        # name lookups block, and a sandboxed agent can ask for slow ones: keep them off the loop
+        decision = await asyncio.get_running_loop().run_in_executor(
+            None, check_connect, host, port, self.allowlist, resolver
+        )
         self.decisions.append(Logged(host, port, decision.allowed, decision.reason))
         if not decision.allowed:
             await _reply(writer, 403, "Forbidden")

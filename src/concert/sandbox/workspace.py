@@ -7,6 +7,7 @@ non-reviewable bytes into a commit. The agent's scratch directory and `.git` are
 """
 
 import os
+import stat
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 
@@ -51,19 +52,38 @@ def snapshot(
         for name in files:
             path = here / name
             relative = path.relative_to(root).as_posix()
-            if path.is_symlink():
+            kind = path.lstat().st_mode
+            if stat.S_ISLNK(kind):
                 raise UnsafeWorkspace(f"symlink: {relative}")
             if is_top and name in _IGNORED_TOP:
                 continue
-            if path.stat().st_size > max_file_bytes:
-                raise UnsafeWorkspace(f"file too large: {relative}")
-            try:
-                found[relative] = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                raise UnsafeWorkspace(f"not text: {relative}") from None
+            found[relative] = _read_regular(path, relative, max_file_bytes)
             if len(found) > max_files:
                 raise UnsafeWorkspace("too many files")
     return found
+
+
+def _read_regular(path: Path, relative: str, max_file_bytes: int) -> str:
+    """Read a regular file and nothing else. A FIFO, socket or device would block a read forever
+    (an agent can `mkfifo`), so the file is opened without blocking or following links and its
+    type is checked on the open descriptor, which also closes the race with a swap after lstat."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except OSError:
+        raise UnsafeWorkspace(f"not a regular file: {relative}") from None
+    with os.fdopen(fd, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise UnsafeWorkspace(f"not a regular file: {relative}")
+        if info.st_size > max_file_bytes:
+            raise UnsafeWorkspace(f"file too large: {relative}")
+        data = handle.read(max_file_bytes + 1)
+    if len(data) > max_file_bytes:
+        raise UnsafeWorkspace(f"file too large: {relative}")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise UnsafeWorkspace(f"not text: {relative}") from None
 
 
 def changes_since(before: Mapping[str, str], root: Path) -> dict[str, str | None]:
