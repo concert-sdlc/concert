@@ -77,9 +77,9 @@ def test_what_an_agent_learned_and_which_lessons_it_followed_reach_the_handoff()
 
 def test_the_agent_is_given_the_accepted_lessons_that_apply() -> None:
     world = World()
-    issue, _run, head = committing_run(world)
+    issue, _run, _head = committing_run(world)
     world.worker_commit(
-        f"pm/{issue}",
+        "staging",  # what an admin merged
         {
             "docs/lessons/L0001-ci.md": lesson_file("L0001", applies_to=["spec"]),
             "docs/lessons/L0002-other.md": lesson_file("L0002", applies_to=["in_review"]),
@@ -87,12 +87,26 @@ def test_the_agent_is_given_the_accepted_lessons_that_apply() -> None:
             "docs/lessons/L0004-broken.md": "not a lesson",
         },
     )
-    world.assign(issue, head=world.pm.get_ref(f"pm/{issue}"))
     agent = Scripted()
     worker(world, agent).run_once(issue, now=world.fake.now)
     [*_, task] = agent.tasks
     assert [x.id for x in task.lessons] == ["L0001"]
-    assert head != world.pm.get_ref(f"pm/{issue}")
+
+
+def test_a_lesson_written_on_the_issue_branch_is_never_shown_to_an_agent() -> None:
+    """Lessons are text every agent reads: only what an admin merged to the base branch counts, not
+    what an earlier run left on its own branch (a protected path stops the merge, not the next run)."""
+    world = World()
+    issue, _run, _head = committing_run(world)
+    world.worker_commit(
+        f"pm/{issue}",
+        {"docs/lessons/L0099-evil.md": lesson_file("L0099", applies_to=[])},
+    )
+    world.assign(issue, head=world.pm.get_ref(f"pm/{issue}"))
+    agent = Scripted()
+    worker(world, agent).run_once(issue, now=world.fake.now)
+    [*_, task] = agent.tasks
+    assert task.lessons == ()
 
 
 def test_lessons_reach_the_prompt_fenced_as_data() -> None:

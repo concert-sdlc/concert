@@ -28,7 +28,9 @@ def build_service(settings: Settings, transport: Transport, clock: Callable[[], 
     )
     # the real identities (bot user ids) come from process.yaml on every tick
     unknown = Identity(user_id=0, login="unconfigured", is_bot=True)
-    worker = Worker(worker_github, settings.runner, unknown, unknown, agent)
+    worker = Worker(
+        worker_github, settings.runner, unknown, unknown, agent, base_branch=settings.base_branch
+    )
     return Service(
         pm_github=pm_github,
         mirror=Mirror(pm_github, author="concert-pm"),

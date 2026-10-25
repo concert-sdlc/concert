@@ -19,7 +19,7 @@ from concert.core.handoff import RunState
 from concert.core.lessons import Lesson, load_lessons, select_lessons
 from concert.core.paths import WORKFLOW_PATHS, matches_any
 from concert.core.spec_hash import spec_tree_hash
-from concert.github.api import BinaryBlob, GitHubApi, GitHubError, Identity
+from concert.github.api import BinaryBlob, GitHubApi, GitHubError, Identity, NotFound
 from concert.github.comments import extract_events, render_handoff_comment
 from concert.github.heartbeats import write_heartbeat
 
@@ -87,7 +87,9 @@ class Worker:
         pm: Identity,
         agent: Agent,
         heartbeat_every: float = 60.0,
+        base_branch: str = "staging",
     ) -> None:
+        self.base_branch = base_branch
         self.github = github
         self.heartbeat_every = heartbeat_every
         self._unpostable: set[str] = set()  # runs whose report GitHub refused: not paid for twice
@@ -144,6 +146,14 @@ class Worker:
             done.append(run.run_id)
         return done
 
+    def _lessons(self) -> list[Lesson]:
+        """Lessons come from the base branch only. Every agent reads them, so they count only
+        once an admin merged them; the issue branch is written by agents and is not trusted."""
+        try:
+            return load_lessons(self.github.read_tree(self.base_branch))[0]
+        except NotFound:
+            return []
+
     def beat(self, now: int, running: Sequence[str] = ()) -> None:
         """Report the runs this runner holds: the one being executed and any paused by a limit."""
         paused = {r: until for r, until in self._paused.items() if until - now <= PAUSE_BUDGET}
@@ -180,7 +190,7 @@ class Worker:
             spec_rev=spec_rev,
             approved_spec_rev=approved,
             answers=answers,
-            lessons=tuple(select_lessons(load_lessons(tree)[0], run.state, tree.keys())),
+            lessons=tuple(select_lessons(self._lessons(), run.state, tree.keys())),
         )
         with self._beating(run.run_id):
             result = self.agent.run(task)
