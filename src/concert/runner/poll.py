@@ -771,6 +771,20 @@ class _Poll:
             return self._block(f"reclassified to a code issue after review: {shown}")
         return False
 
+    def _finished_rebase(self, current: str | None) -> dict[str, int | str | None] | None:
+        """An earlier attempt moved the branch and crashed before its outcome was recorded. Its
+        result is recognised by what it is, whatever staging did since: staging itself, or exactly
+        one commit the PM made on top of a staging commit. Anything else is someone else's push."""
+        if current is None:
+            return None
+        pm = self.config.pm.login
+        ahead = self.github.list_commits(self.config.base_branch, current)  # what staging lacks
+        if not ahead:
+            return {"sha": current, "base": current}
+        if len(ahead) == 1 and ahead[0].author == pm and ahead[0].committer == pm:
+            return {"sha": current, "base": ahead[0].parent}
+        return None
+
     def _workflow_kit(
         self, issue: int, parent: int | None, files: Mapping[str, str], digest: str
     ) -> str:
@@ -903,12 +917,9 @@ class _Poll:
             return {"error": f"no {self.config.base_branch} branch"}
         current = github.get_ref(branch)
         if current != head:
-            # An earlier attempt may have moved the branch and crashed before its outcome: that
-            # result is kept. Anything else is a push this rebase knows nothing about.
-            if current is not None and (
-                current == target or github.commit_parents(current) == (target,)
-            ):
-                return {"sha": current, "base": target}
+            adopted = self._finished_rebase(current)
+            if adopted is not None:
+                return adopted
             return {"error": f"{branch} moved to {current} while a rebase of {head} was pending"}
         own = github.list_commits(
             self.config.base_branch, head

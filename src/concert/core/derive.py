@@ -365,6 +365,7 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             froze_queue=False,
             asked_from=None,
             question_comment_id=None,
+            staging_rebases=0,
         )
     if kind == "issue_typed":
         if state.status is not Status.INBOX:
@@ -560,6 +561,7 @@ def _apply(state: IssueState, event: Event) -> IssueState:
             status=Status(event.data["to"]),
             note=None,
             froze_queue=False,
+            staging_rebases=0,  # an admin put it back in the flow: the queue-head bound starts over
         )
     if kind in _RECORD_ONLY:
         return state

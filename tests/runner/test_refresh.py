@@ -188,20 +188,42 @@ def test_a_resumed_rebase_refuses_to_overwrite_a_branch_that_moved_meanwhile() -
     assert world.pm.get_ref(branch) == foreign != head  # their push is still there
 
 
-def test_a_rebase_that_moved_the_branch_before_a_crash_is_adopted_not_redone() -> None:
+def test_a_rebase_that_moved_the_branch_before_a_crash_is_adopted_even_if_staging_moved_since() -> (
+    None
+):
     project = Project()
     world, issue = project.world, project.issue
     head, branch = pending_rebase(project)
     gh = world.fake.client(world.pm_identity)
     gh.create_branch("scratch", "staging")
     done = gh.commit(
-        "scratch", "Rebase", {"backend/export.py": "def export(): ..."}, author="pm", committer="pm"
+        "scratch",
+        "Rebase",
+        {"backend/export.py": "def export(): ..."},
+        author=world.pm_identity.login,
+        committer=world.pm_identity.login,
     )
-    gh.update_ref(branch, done, force=True)  # the previous attempt got this far
+    gh.update_ref(branch, done, force=True)  # the previous attempt got this far, then crashed
+    staging_moves(project, {"docs/third.md": "arrived after the crash"})
     world.fake.tick(1)
     world.poll(issue)
     state = world.state(issue)
     assert state.head_sha == done != head and state.pm_commits == (done,)
+
+
+def test_a_commit_by_someone_else_on_top_of_staging_is_not_taken_for_our_rebase() -> None:
+    project = Project()
+    world, issue = project.world, project.issue
+    head, branch = pending_rebase(project)
+    gh = world.fake.client(world.pm_identity)
+    gh.create_branch("scratch", "staging")
+    forged = gh.commit(
+        "scratch", "Rebase", {"backdoor.py": "evil()"}, author="mallory", committer="mallory"
+    )
+    gh.update_ref(branch, forged, force=True)
+    world.fake.tick(1)
+    assert world.poll(issue).status is Status.BLOCKED
+    assert world.state(issue).head_sha == head and world.state(issue).pm_commits == ()
 
 
 # --- the queue-head rebase is bounded ---------------------------------------------------------------
@@ -233,3 +255,31 @@ def test_staging_that_keeps_moving_at_the_queue_head_ends_in_a_block_not_a_loop(
     assert "moved again after 1 rebases" in (
         world.state(issue).blocked_reason or world.state(issue).note or ""
     )
+
+
+def test_an_admin_putting_the_issue_back_restarts_the_queue_rebase_bound() -> None:
+    project = Project()
+    project.world.config = replace(project.world.config, queue_rebases=1)
+    world, issue = project.world, project.issue
+    to_uat(project)
+    project.run_until(Status.HUMAN_UAT)
+    old = world.state(issue).head_sha or ""
+    world.fake.add_check_run(old, "tests", "success", "w1")
+    project.step()
+    staging_moves(project, {"docs/late.md": "1"})
+    project.human(f"/approve uat {old}")
+    for _ in range(10):
+        project.step()
+        if world.state(issue).head_sha != old:
+            break
+    project.run_until(Status.HUMAN_UAT)
+    newer = world.state(issue).head_sha or ""
+    world.fake.add_check_run(newer, "tests", "success", "w1")
+    project.step()
+    staging_moves(project, {"docs/later.md": "2"})
+    project.human(f"/approve uat {newer}")
+    project.run_until(Status.BLOCKED)
+    assert world.state(issue).staging_rebases == 1
+    project.human("/unblock in_review")
+    project.run_until(Status.IN_REVIEW)
+    assert world.state(issue).staging_rebases == 0  # a fresh allowance for the new attempt
