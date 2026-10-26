@@ -40,4 +40,5 @@ class GitFacts:
             commit_exists_on_remote=exists,
             tree_hash_at_commit=spec_tree_hash(tree, issue) if exists else None,
             paths_at_commit=frozenset(tree),
+            current_head=state.head_sha,
         )

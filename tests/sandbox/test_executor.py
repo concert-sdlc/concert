@@ -59,7 +59,10 @@ def test_traffic_goes_through_the_proxy() -> None:
     assert (
         "HTTPS_PROXY=http://172.20.0.2:3128" in env and "https_proxy=http://172.20.0.2:3128" in env
     )
-    assert "NO_PROXY=" in env
+    # only loopback bypasses it: the app under test runs inside the container, and the proxy
+    # answers 405 to a request for 127.0.0.1; nothing external is exempt
+    assert "NO_PROXY=127.0.0.1,localhost,::1" in env
+    assert "no_proxy=127.0.0.1,localhost,::1" in env
 
 
 def test_secret_values_never_appear_in_the_command_line() -> None:

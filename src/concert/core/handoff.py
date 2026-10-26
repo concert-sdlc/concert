@@ -167,6 +167,7 @@ class RunFacts:
     commit_exists_on_remote: bool
     tree_hash_at_commit: str | None  # tree hash of docs/specs/<issue>/ at commit_sha
     paths_at_commit: frozenset[str]
+    current_head: str | None = None  # the issue's head now; None where it is not known
 
 
 @dataclass(frozen=True)
@@ -240,6 +241,12 @@ def accept_handoff(
         return Ignored(f"the lease of run {handoff.run_id} had expired")
 
     state = handoff.state
+    if (
+        state in (_S.IN_REVIEW, _S.UAT)
+        and facts.current_head is not None
+        and facts.run_start_head != facts.current_head
+    ):
+        return Ignored("the run started on an older head than the issue has now")
     exits = _EXITS[state]
     if handoff.exit not in exits:
         return Invalid(f"exit {handoff.exit!r} is not listed for {state.value}")

@@ -285,3 +285,14 @@ def test_rebases_are_recorded_as_an_old_to_new_mapping() -> None:
 def test_a_malformed_rebase_mapping_is_rejected(bad: object) -> None:
     with pytest.raises(MalformedEvent):
         parse_handoff(raw_handoff(rebases=bad))
+
+
+def test_a_review_or_uat_report_from_an_older_head_is_ignored() -> None:
+    """After a rebase the issue is reviewed again; a report from a run that started on the old
+    head must not stand in for the new round."""
+    review = handoff(state="in_review", exit="clean", reviewer="code", commit_sha=HEAD)
+    current = replace(GOOD_FACTS, current_head=HEAD)
+    assert decide(review, facts=current) == Accepted(trigger=Trigger.CLEAN, spec_drift=False)
+    assert isinstance(decide(review, facts=replace(GOOD_FACTS, current_head=COMMIT)), Ignored)
+    uat = handoff(state="uat", exit="passed", commit_sha=HEAD)
+    assert isinstance(decide(uat, facts=replace(GOOD_FACTS, current_head=COMMIT)), Ignored)
