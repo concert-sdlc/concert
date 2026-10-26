@@ -1,0 +1,21 @@
+docs/LIVE_VALIDATION.md
+  s_f3f5335312522f::t_ec76e552b42ae2 161-167,177-179,182
+docs/STATUS.md
+  s_f3f5335312522f::t_63409356e90d64 4-9,74-75,77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e3482641bf7fc365262da8753a6cc8c8b7c69e78",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
