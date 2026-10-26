@@ -44,7 +44,7 @@ def docker_argv(spec: DockerSpec, workdir: Path, command: list[str], name: str) 
     env: list[str] = []
     for key in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
         env += ["-e", f"{key}={spec.proxy_url}"]
-    env += ["-e", "NO_PROXY="]
+    env += ["-e", "NO_PROXY=", "-e", "PYTHONDONTWRITEBYTECODE=1"]
     for key in spec.passthrough_env:
         env += ["-e", key]
     return [

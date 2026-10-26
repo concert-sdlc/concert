@@ -45,8 +45,8 @@ def snapshot(
             path = here / name
             if path.is_symlink():
                 raise UnsafeWorkspace(f"symlink: {path.relative_to(root).as_posix()}")
-            if is_top and name in _IGNORED_TOP:
-                dirs.remove(name)
+            if (is_top and name in _IGNORED_TOP) or name == "__pycache__":
+                dirs.remove(name)  # a test run's bytecode is build output, never source
             elif name == ".git":
                 raise UnsafeWorkspace(f"nested git directory: {path.relative_to(root).as_posix()}")
         for name in files:

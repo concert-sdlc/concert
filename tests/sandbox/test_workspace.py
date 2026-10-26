@@ -101,3 +101,10 @@ def test_the_reserved_top_level_names_cannot_be_materialized(tmp_path: Path) -> 
     for bad in (".git/config", ".concert-run/result.json"):
         with pytest.raises(UnsafeWorkspace, match="reserved"):
             materialize({bad: "x"}, tmp_path)
+
+
+def test_python_bytecode_caches_are_build_output_not_changes(tmp_path: Path) -> None:
+    (tmp_path / "pkg" / "__pycache__").mkdir(parents=True)
+    (tmp_path / "pkg" / "__pycache__" / "a.cpython-311.pyc").write_bytes(b"\xff\x00\x01")
+    (tmp_path / "pkg" / "a.py").write_text("x = 1\n")
+    assert snapshot(tmp_path) == {"pkg/a.py": "x = 1\n"}
