@@ -1,5 +1,6 @@
 """The worker executes the runs the PM assigned to it and posts handoffs (no real agent)."""
 
+import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
@@ -7,7 +8,14 @@ from typing import Any, cast
 from concert.core.transitions import Status
 from concert.github.api import Forbidden, GitHubApi
 from concert.github.comments import extract_handoffs
-from concert.runner.worker import AgentFailure, AgentResult, AgentTask, Worker
+from concert.runner.worker import (
+    FAILURE_LIMIT,
+    MEMORY_LIMIT,
+    AgentFailure,
+    AgentResult,
+    AgentTask,
+    Worker,
+)
 from tests.runner.helpers import ALICE, PM, VM1, World, spec_files
 
 
@@ -289,3 +297,37 @@ def test_a_triage_run_sees_the_base_branch_though_it_has_no_head() -> None:
     worker(world, agent).run_once(issue, now=world.fake.now)
     assert agent.tasks[0].head is None
     assert agent.tasks[0].tree == {"README": "x"}  # the repository, not an empty directory
+
+
+def failing_world(tmp_path: Path | None = None) -> tuple[World, Worker]:
+    world = World()
+    memory = tmp_path / "memory.json" if tmp_path else None
+    return world, Worker(
+        cast(GitHubApi, _RefusingComments(world.fake.client(VM1))),
+        "vm-1",
+        VM1,
+        PM,
+        Scripted(),
+        memory=memory,
+    )
+
+
+def test_the_memory_is_bounded_and_survives_a_torn_file(tmp_path: Path) -> None:
+    memory = tmp_path / "memory.json"
+    _world, w = failing_world(tmp_path)
+    for n in range(MEMORY_LIMIT + 50):
+        w.remember_refused(f"r-1-{n}")
+    kept = set(json.loads(memory.read_text()))
+    assert len(kept) == MEMORY_LIMIT and f"r-1-{MEMORY_LIMIT + 49}" in kept
+    assert [p.name for p in tmp_path.iterdir()] == ["memory.json"]  # no temp file left behind
+    memory.write_text('["r-1-')  # a write cut short
+    assert failing_world(tmp_path)[1].refused() == set()
+
+
+def test_recorded_failures_are_bounded() -> None:
+    _world, w = failing_world()
+    for n in range(FAILURE_LIMIT + 40):
+        w.record_failure(f"#1: failure {n}")
+    assert (
+        len(w.failures) == FAILURE_LIMIT and w.failures[-1] == f"#1: failure {FAILURE_LIMIT + 39}"
+    )

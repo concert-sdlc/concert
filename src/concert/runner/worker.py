@@ -8,13 +8,14 @@ behind a small protocol, so the real Claude Code adapter and the test doubles sh
 """
 
 import json
+import os
 import threading
 import time
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from concert.core.derive import ActiveRun, derive
 from concert.core.handoff import RunState
@@ -32,6 +33,10 @@ MAX_PAUSES = 24  # pauses per run; past it the run is left to lapse and be charg
 PAUSE_BUDGET = 6 * 3600  # a reset further away than this is not waited for: the PM reassigns
 _ITEM = 1_000  # one decision, doubt or path in a handoff
 _LIST = 8_000  # all the items of one list
+
+
+MEMORY_LIMIT = 500  # refused run ids kept on disk; far more than runs can be live at once
+FAILURE_LIMIT = 100  # failures kept for the operator when nobody drains them
 
 
 @dataclass(frozen=True)
@@ -98,7 +103,8 @@ class Worker:
         self.github = github
         self.heartbeat_every = heartbeat_every
         # runs whose report GitHub refused: not paid for twice, even by a later process (`--once`)
-        self._unpostable: set[str] = self._remembered()
+        self._order: list[str] = self._remembered()  # oldest first, for trimming
+        self._unpostable: set[str] = set(self._order)
         self._paused: dict[str, int] = {}  # run_id -> when a usage limit lets it run again
         self._pauses: dict[str, int] = {}  # run_id -> how many times it was paused
         self._given_up: set[str] = set()  # paused past the budget: left to lapse, not run again
@@ -151,7 +157,7 @@ class Worker:
                     self._given_up.add(run.run_id)  # lapses and the PM charges and reassigns
                 continue
             except AgentFailure as failure:
-                self.failures.append(f"#{issue}: {failure}")
+                self.record_failure(f"#{issue}: {failure}")
                 continue
             done.append(run.run_id)
         return done
@@ -164,20 +170,41 @@ class Worker:
         except NotFound:
             return []
 
-    def _remembered(self) -> set[str]:
+    def _remembered(self) -> list[str]:
         try:
-            return set(json.loads(self._memory.read_text())) if self._memory else set()
-        except (OSError, ValueError, TypeError):
-            return set()
+            found: object = json.loads(self._memory.read_text()) if self._memory else []
+        except (OSError, ValueError):
+            return []
+        if not isinstance(found, list):
+            return []
+        return [i for i in cast("list[object]", found) if isinstance(i, str)][-MEMORY_LIMIT:]
 
-    def _remember(self) -> None:
+    def refused(self) -> set[str]:
+        """Runs whose report GitHub refused: not paid for again."""
+        return set(self._unpostable)
+
+    def remember_refused(self, run_id: str) -> None:
+        if run_id not in self._unpostable:
+            self._order.append(run_id)
+        self._unpostable.add(run_id)
+        self._persist()
+
+    def _persist(self) -> None:
+        self._order = self._order[-MEMORY_LIMIT:]
+        self._unpostable = set(self._order)
         if self._memory is None:
             return
+        temporary = self._memory.with_name(self._memory.name + ".tmp")
         try:
             self._memory.parent.mkdir(parents=True, exist_ok=True)
-            self._memory.write_text(json.dumps(sorted(self._unpostable)))
+            temporary.write_text(json.dumps(self._order))
+            os.replace(temporary, self._memory)  # a crash leaves the old file, never half a file
         except OSError:
             pass  # only costs a repeat run; the failure itself is already reported
+
+    def record_failure(self, message: str) -> None:
+        self.failures.append(message)
+        del self.failures[:-FAILURE_LIMIT]
 
     def beat(self, now: int, running: Sequence[str] = ()) -> None:
         """Report the runs this runner holds: the one being executed and any paused by a limit."""
@@ -264,8 +291,7 @@ class Worker:
         try:
             self.github.add_comment(issue, body)
         except GitHubError as error:
-            self._unpostable.add(run.run_id)
-            self._remember()
+            self.remember_refused(run.run_id)
             raise AgentFailure(f"the report was not accepted by GitHub: {error}") from error
 
     @contextmanager

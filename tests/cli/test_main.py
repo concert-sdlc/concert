@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from concert.cli import main
 from concert.cli.settings import Settings
-from concert.cli.wiring import build_service
+from concert.cli.wiring import build_service, file_name
 from concert.github.http import Response
 
 
@@ -219,3 +219,9 @@ def test_a_missing_agent_credential_stops_the_run_before_anything_starts(tmp_pat
     env = env_for(tmp_path) | {"CONCERT_AGENT_AUTH": "oauth_token", "ANTHROPIC_API_KEY": "sk-x"}
     assert main(["run", "--once"], env=env, transport=Offline(), stderr=err) == 2
     assert "CLAUDE_CODE_OAUTH_TOKEN" in err.getvalue()  # the API key does not stand in for it
+
+
+def test_a_runner_name_cannot_escape_the_state_directory() -> None:
+    assert file_name("../../etc/x") == "_.._etc_x"
+    assert "/" not in file_name("a/b") and not file_name("../x").startswith(".")
+    assert file_name("live-test") == "live-test" and file_name("") == "runner"

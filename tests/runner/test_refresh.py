@@ -283,3 +283,17 @@ def test_an_admin_putting_the_issue_back_restarts_the_queue_rebase_bound() -> No
     project.human("/unblock in_review")
     project.run_until(Status.IN_REVIEW)
     assert world.state(issue).staging_rebases == 0  # a fresh allowance for the new attempt
+
+
+def test_a_rebase_voids_the_runs_in_flight_on_the_old_head_without_charging_them() -> None:
+    project = Project()
+    world, issue = project.world, project.issue
+    to_uat(project)
+    old = [r.run_id for r in world.state(issue).active_runs]
+    assert old, "a UAT run is in flight"
+    staging_moves(project, {"docs/other.md": "other work"})
+    project.step()
+    state = world.state(issue)
+    assert state.status is Status.IN_REVIEW
+    assert not set(old) & {r.run_id for r in state.active_runs}  # voided, so they cannot lapse
+    assert state.infra_attempts == {}

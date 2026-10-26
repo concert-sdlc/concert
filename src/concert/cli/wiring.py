@@ -1,6 +1,7 @@
 """Building the service from settings: one place that knows how the pieces connect."""
 
 import os
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -35,7 +36,7 @@ def build_service(settings: Settings, transport: Transport, clock: Callable[[], 
         unknown,
         agent,
         base_branch=settings.base_branch,
-        memory=_state_dir() / f"{settings.runner}-unpostable.json",
+        memory=_state_dir() / f"{file_name(settings.runner)}-unpostable.json",
     )
     return Service(
         pm_github=pm_github,
@@ -71,3 +72,8 @@ def _read_key(path: Path) -> str:
 def _state_dir() -> Path:
     """Where this runner remembers what must survive a restart (CONCERT_STATE_DIR, else ~/.concert)."""
     return Path(os.environ.get("CONCERT_STATE_DIR") or Path.home() / ".concert")
+
+
+def file_name(name: str) -> str:
+    """A runner name as a file name: it is configuration text, never a path."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", name).lstrip(".") or "runner"
