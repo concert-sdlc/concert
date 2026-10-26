@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 from concert.core.assign import ASSIGN_GRACE, RunnerInfo
+from concert.core.derive import ActiveRun
 from concert.core.transitions import Status
 from tests.runner.helpers import ALICE, SPEC_FILES, World
 
@@ -296,7 +297,7 @@ def test_a_single_slot_runner_reviews_one_reviewer_after_the_other() -> None:
     assert world.poll(issue).status is Status.IN_REVIEW
     [first] = world.active(issue)  # one slot: one reviewer at a time
 
-    def report(run) -> None:
+    def report(run: ActiveRun) -> None:
         world.heartbeat(run.run_id)
         world.handoff(
             issue, run.run_id, "in_review", "clean", reviewer=run.reviewer, commit_sha=code,
