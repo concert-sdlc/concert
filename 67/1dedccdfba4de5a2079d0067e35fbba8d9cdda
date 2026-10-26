@@ -1,0 +1,27 @@
+src/concert/cli/wiring.py
+  s_f3f5335312522f::t_a8c0a957038602 4,39,75-79
+src/concert/runner/worker.py
+  s_f3f5335312522f::t_1bcc2001949108 11,18,38-41,106-107,160,173,175-180,182-194,197,200-201,205-208,294
+tests/cli/test_main.py
+  s_f3f5335312522f::t_dbfe0c1c442047 13,222-227
+tests/runner/test_refresh.py
+  s_f3f5335312522f::t_9d8ce3d7a73a79 286-299
+tests/runner/test_worker.py
+  s_f3f5335312522f::t_7cac646fb33317 3,11-18,300-333
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "671dedccdfba4de5a2079d0067e35fbba8d9cdda",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
