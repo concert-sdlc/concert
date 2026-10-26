@@ -1,0 +1,19 @@
+docs/LIVE_VALIDATION.md
+  s_f3f5335312522f::t_8ac65052fca0a8 159-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bbb217e07860544c35cab7a1b7aef25ddc639b5d",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "unknown"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
