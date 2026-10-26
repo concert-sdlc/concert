@@ -1,0 +1,27 @@
+src/concert/core/handoff.py
+  s_f3f5335312522f::t_5af3090864d45b 170,244-249
+src/concert/github/git_facts.py
+  s_f3f5335312522f::t_d67b03f3352662 43
+src/concert/sandbox/executor.py
+  s_f3f5335312522f::t_7442f05799a408 47-49
+tests/core/test_handoff.py
+  s_f3f5335312522f::t_e1a46a6fc4d949 288-298
+tests/sandbox/test_executor.py
+  s_f3f5335312522f::t_a09e999c77f654 62-65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0a42a34bfe35ccca12728af6e7ebbaaa47e46006",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
