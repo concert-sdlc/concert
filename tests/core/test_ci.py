@@ -34,7 +34,7 @@ def test_a_failed_check_is_failing_evidence() -> None:
 
 
 def test_only_success_passes() -> None:
-    for conclusion in ("cancelled", "timed_out", "neutral", "skipped", "action_required"):
+    for conclusion in ("cancelled", "timed_out", "neutral", "action_required"):
         [proposal] = plan([run("tests", conclusion)])
         assert proposal.data["passed"] is False, conclusion
 
@@ -142,3 +142,19 @@ def test_a_recorded_review_is_not_recorded_again() -> None:
 def test_two_admins_are_both_recorded() -> None:
     proposals = plan_review_evidence("h1", [review(7), review(9)], (), frozenset({7, 9}))
     assert [p.data["actor_id"] for p in proposals] == [7, 9]
+
+
+def timed(name: str, conclusion: str, at: int) -> CheckRun:
+    return CheckRun(name, "h1", conclusion, "w1", completed_at=at)
+
+
+def test_a_skipped_run_tested_nothing_so_it_is_no_evidence() -> None:
+    assert plan([run("tests", "skipped")]) == []
+
+
+def test_the_newest_run_wins_even_when_github_lists_it_first() -> None:
+    # the draft run was skipped, the ready run passed; GitHub lists newest first
+    [proposal] = plan([timed("tests", "success", 200), timed("tests", "skipped", 100)])
+    assert proposal.data["passed"] is True
+    [proposal] = plan([timed("tests", "failure", 200), timed("tests", "success", 100)])
+    assert proposal.data["passed"] is False

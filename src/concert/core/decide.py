@@ -20,6 +20,7 @@ from concert.core.derive import IssueState
 from concert.core.evidence import GatePolicy, Ready, evaluate_gate
 from concert.core.handoff import Accepted, Handoff, consolidate_reviews
 from concert.core.transitions import IssueType, Status, Trigger, is_terminal, next_status
+from concert.core.verdicts import newest_verdicts
 from concert.core.workflow import diff_hash
 
 if TYPE_CHECKING:  # ci imports Proposed from here
@@ -528,9 +529,7 @@ def plan_revert_ci(
             return run.completed_at > rerun_at
         return now >= rerun_at + RERUN_GRACE
 
-    latest = {
-        r.name: r for r in runs if r.head_sha == state.revert_head and r.conclusion and counts(r)
-    }
+    latest = newest_verdicts(r for r in runs if r.head_sha == state.revert_head and counts(r))
     results = [latest[name].conclusion == "success" for name in dod_items if name in latest]
     if False in results and state.revert_ci_reruns < REVERT_CI_RERUNS:
         return [Proposed("revert_ci_rerun", {"head": state.revert_head, "at": now})]

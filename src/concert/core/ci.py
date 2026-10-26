@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from concert.core.decide import Proposed
 from concert.core.evidence import Evidence
+from concert.core.verdicts import newest_verdicts
 
 
 @dataclass(frozen=True)
@@ -72,10 +73,7 @@ def plan_ci_evidence(
 ) -> list[Proposed]:
     if head_sha is None:
         return []
-    latest: dict[str, CheckRun] = {}
-    for found in runs:  # a later run of the same check replaces the earlier one
-        if found.head_sha == head_sha and found.conclusion is not None:
-            latest[found.name] = found
+    latest = newest_verdicts(r for r in runs if r.head_sha == head_sha)
     proposals: list[Proposed] = []
     for name in sorted(dod_items):
         found = latest.get(name)
