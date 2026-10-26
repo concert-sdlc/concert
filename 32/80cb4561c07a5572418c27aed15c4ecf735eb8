@@ -1,0 +1,23 @@
+src/concert/core/assign.py
+  s_f3f5335312522f::t_2f02fa3c4843eb 9,67-70,72-74,82
+src/concert/runner/poll.py
+  s_f3f5335312522f::t_96922e038d0b8b 192,405,1098,1108-1110
+tests/runner/test_assignment.py
+  s_f3f5335312522f::t_9b189148df871a 3-5,272-316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3280cb4561c07a5572418c27aed15c4ecf735eb8",
+  "prompts": {},
+  "sessions": {
+    "s_f3f5335312522f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ab088378-f50a-400d-b70a-30f1152fa2d9",
+        "model": "claude-sonnet-5-5"
+      },
+      "human_author": "Andrés González <andres@aulasneo.com>"
+    }
+  }
+}
