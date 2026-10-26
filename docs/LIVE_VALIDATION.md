@@ -173,7 +173,10 @@ Found live, each invisible to the fake and fixed test-first:
 | CI skipped on a draft PR was recorded as a failure, and GitHub's newest-first order let it replace a later success. | A skipped run is no verdict; the newest run per check wins (`core/verdicts.py`). |
 | With `max_parallel: 1` the second reviewer was never assigned and the first looped on lease expiry. | A run with a valid report posted keeps its lease and frees its slot. |
 
-Cost is not recorded by the runner; read it from the Console Usage page.
+Cost, from the Console: **USD 1.24** for the whole stage (about ten agent runs, 1.14 M input and
+22 k output tokens, model `claude-opus-5-5`), including the runs the permission bug wasted. About
+USD 0.12 a run, roughly USD 1 for a tiny issue through review. The runner does not record cost;
+read it from the Console Cost page.
 
 ## Record the result
 
