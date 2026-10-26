@@ -4,7 +4,7 @@ Milestone 1 (the "Friday test"): one runner, one adopted project. Everything bel
 tests that run against an in-memory fake of GitHub. **Live validation, 2026-10-25/26** (see
 [LIVE_VALIDATION.md](LIVE_VALIDATION.md)): 14 live contract tests against real GitHub, and one
 throwaway issue taken from `inbox` to `on_staging` with real agents (Claude Code in a `runc`
-container behind the egress proxy), about USD 1.24 up to UAT. Not yet exercised live: quota
+container behind the egress proxy), USD 2.60 in total. Not yet exercised live: quota
 pauses, workflow-file pushes, the daily digest, `concert adopt`, revert PRs, conflicts on rebase,
 gVisor, and the same flow on the Colima host.
 

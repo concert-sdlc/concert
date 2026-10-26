@@ -181,7 +181,8 @@ Found live, each invisible to the fake and fixed test-first:
 
 Cost, from the Console, up to the first `uat`: **USD 1.24** (about ten agent runs, 1.14 M input and
 22 k output tokens, model `claude-opus-5-5`), including the runs the permission bug wasted. About
-USD 0.12 a run, roughly USD 1 for a tiny issue through review. The runner does not record cost;
+USD 0.12 a run, roughly USD 1 for a tiny issue through review. The whole lifecycle to `on_staging`,
+with the rebase and the re-review, came to **USD 2.60** in total. The runner does not record cost;
 read it from the Console Cost page.
 
 ## Record the result
