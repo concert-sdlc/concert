@@ -156,6 +156,25 @@ Verified without a model (2026-10-25, OrbStack, `runc`): the image builds and pa
 run directory mounted and writable. Not yet verified: the same on the Colima VM (file ownership on
 its mount), and any model run.
 
+### Result of stage 3 (2026-10-26, `runc`, real model, throwaway issue #41)
+
+One issue went from `inbox` to `uat` with every agent run in the sandbox: triage (asked five
+questions, answered by a human), triage again, spec (approved by hash), implementing, then the
+`code` and `security` reviews. The egress proxy and the container lifecycle behaved. Not yet
+reached: UAT (no runner has the `browser` capability) and everything after it.
+
+Found live, each invisible to the fake and fixed test-first:
+
+| Found live | Fix |
+|---|---|
+| The Worker App could not post the handoff (no Issues permission); the failure was swallowed and every `--once` process paid for the same run again. | `issues: write` on the Worker App; failures print as `concert:` lines; refused run ids persist in `CONCERT_STATE_DIR` (default `~/.concert`). |
+| A triage run had no head commit and so saw an empty repository. | Head-less runs read the base branch. |
+| A reviewer that ran the tests left `__pycache__/*.pyc`; the run was refused as "not text". | `__pycache__` ignored in the workspace, `PYTHONDONTWRITEBYTECODE=1` in the container. |
+| CI skipped on a draft PR was recorded as a failure, and GitHub's newest-first order let it replace a later success. | A skipped run is no verdict; the newest run per check wins (`core/verdicts.py`). |
+| With `max_parallel: 1` the second reviewer was never assigned and the first looped on lease expiry. | A run with a valid report posted keeps its lease and frees its slot. |
+
+Cost is not recorded by the runner; read it from the Console Usage page.
+
 ## Record the result
 
 Add the date, the pass or fail of each stage and every mismatch found to `docs/STATUS.md`, and
