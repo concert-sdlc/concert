@@ -1,6 +1,8 @@
 """The poll loop assigns runs, expires leases, creates the issue branch and runs the checks."""
 
-from concert.core.assign import ASSIGN_GRACE
+from dataclasses import replace
+
+from concert.core.assign import ASSIGN_GRACE, RunnerInfo
 from concert.core.transitions import Status
 from tests.runner.helpers import ALICE, SPEC_FILES, World
 
@@ -267,3 +269,48 @@ def test_an_issue_reaches_uat_with_the_loop_assigning_every_run() -> None:
     assert world.poll(issue).status is Status.UAT
     [uat] = world.active(issue)
     assert uat.state == "uat" and uat.runner == "vm-1"
+
+
+def test_a_single_slot_runner_reviews_one_reviewer_after_the_other() -> None:
+    """A reviewer that has reported frees the runner's slot and keeps its lease while the round
+    waits for the other reviewer; otherwise `security` is never assigned and `code` loops."""
+    world = World(auto=True)
+    world.config = replace(
+        world.config, runners=(RunnerInfo("vm-1", caps=frozenset({"docker"}), max_parallel=1),)
+    )
+    issue = dispatched(world)
+    triage_to_spec(world, issue)
+    _run, _sha, spec_hash = spec_run(world, issue)
+    world.poll(issue)
+    world.say(ALICE, issue, f"/approve spec {spec_hash}")
+    world.heartbeat()
+    world.poll(issue)
+    [run] = world.active(issue)
+    world.heartbeat(run.run_id)
+    code = world.wip_commit(issue, run.run_id, {"backend/export.py": "def export(): ..."})
+    world.handoff(
+        issue, run.run_id, "implementing", "done", commit_sha=code, artifact_rev=spec_hash,
+        produced=["backend/export.py"], run_commits=[code],
+    )  # fmt: skip
+    world.heartbeat()
+    assert world.poll(issue).status is Status.IN_REVIEW
+    [first] = world.active(issue)  # one slot: one reviewer at a time
+
+    def report(run) -> None:
+        world.heartbeat(run.run_id)
+        world.handoff(
+            issue, run.run_id, "in_review", "clean", reviewer=run.reviewer, commit_sha=code,
+            artifact_rev=spec_hash,
+        )  # fmt: skip
+
+    report(first)
+    world.heartbeat()  # the finished run is no longer listed as held
+    world.fake.now += ASSIGN_GRACE + 600
+    world.heartbeat()
+    assert world.poll(issue).status is Status.IN_REVIEW
+    active = world.active(issue)
+    assert first.run_id in {r.run_id for r in active}  # not expired
+    [second] = [r for r in active if r.run_id != first.run_id]
+    assert second.reviewer != first.reviewer
+    report(second)
+    assert world.poll(issue).status is Status.UAT

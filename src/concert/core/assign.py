@@ -6,7 +6,7 @@ a grace period for the first heartbeat. An expired lease is an infra failure: th
 reassigned after a backoff, up to 3 retries per state, then the issue is blocked.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from concert.core.decide import Proposed
@@ -64,9 +64,14 @@ def _inactive(state: IssueState) -> bool:
 
 
 def expire_leases(
-    state: IssueState, heartbeats: Mapping[str, Heartbeat], now: int
+    state: IssueState,
+    heartbeats: Mapping[str, Heartbeat],
+    now: int,
+    reported: Collection[str] = (),
 ) -> list[Proposed]:
-    """Expire runs whose lease lapsed. The fourth infra failure in a state blocks the issue."""
+    """Expire runs whose lease lapsed. The fourth infra failure in a state blocks the issue.
+    A run whose valid report is already posted has nothing left to do: it cannot lapse (the
+    report would be discarded) while the PM waits for the other reviewers of its round."""
     if _inactive(state):
         return []
     proposals: list[Proposed] = []
@@ -74,7 +79,7 @@ def expire_leases(
     for run in state.active_runs:
         heartbeat = heartbeats.get(run.runner)
         held = _fresh(heartbeat, now) and heartbeat is not None and run.run_id in heartbeat.run_ids
-        if held or now - run.issued_at < ASSIGN_GRACE:
+        if held or run.run_id in reported or now - run.issued_at < ASSIGN_GRACE:
             continue
         proposals.append(
             Proposed("lease_expired", {"run_id": run.run_id, "state": run.state, "at": now})

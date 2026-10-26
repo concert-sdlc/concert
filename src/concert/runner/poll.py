@@ -189,6 +189,7 @@ class _Poll:
         self.chain: list[Event] = []
         self.records: list[EventRecord] = []
         self.handoff_items: list[HandoffComment] = []
+        self.reported: set[str] = set()  # runs with a valid report posted, not yet settled
         self.state = IssueState()
         self._published_at: dict[int, int] = {}
 
@@ -401,6 +402,7 @@ class _Poll:
             else:
                 self.invalid.append(f"comment {item.comment_id}: {decision.reason}")
 
+        self.reported = {item.handoff.run_id for item in accepted}
         if self._foreign_commits(accepted) or self._workflow_edits(accepted):
             return
 
@@ -1093,7 +1095,7 @@ class _Poll:
             beat = read_heartbeat(self.github, runner.name)
             if beat is not None:
                 heartbeats[runner.name] = beat
-        expired = expire_leases(self.state, heartbeats, self.now)
+        expired = expire_leases(self.state, heartbeats, self.now, self.reported)
         if expired:
             self._post(expired)
         if self.state.blocked_reason is not None or self.state.status is Status.BLOCKED:
@@ -1103,6 +1105,9 @@ class _Poll:
             if self.load is not None
             else dict(Counter(run.runner for run in self.state.active_runs))
         )
+        for run in self.state.active_runs:  # a run that has reported no longer occupies a slot
+            if run.run_id in self.reported and load.get(run.runner, 0) > 0:
+                load = {**load, run.runner: load[run.runner] - 1}
         # staging verification runs on the merge commit; every other run on the issue branch
         head = (
             self.state.revert_merge_sha or self.state.merge_sha
