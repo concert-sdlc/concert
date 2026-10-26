@@ -194,13 +194,15 @@ class Worker:
     ) -> None:
         info = self.github.get_issue(issue)
         # the agent works on text only: a binary file stays in the repository, out of its sight
+        # a run with no head yet (triage) reads the base branch: it must see the repository
+        source = run.head or self.github.get_ref(self.base_branch)
         tree = (
             {
                 p: c
-                for p, c in self.github.read_tree(run.head).items()
+                for p, c in self.github.read_tree(source).items()
                 if not isinstance(c, BinaryBlob)
             }
-            if run.head
+            if source
             else {}
         )
         task = AgentTask(

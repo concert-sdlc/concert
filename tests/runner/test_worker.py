@@ -280,3 +280,12 @@ def test_a_refused_report_is_not_paid_for_again_by_a_later_process(tmp_path: Pat
         issue, now=world.fake.now
     )
     assert second.tasks == []
+
+
+def test_a_triage_run_sees_the_base_branch_though_it_has_no_head() -> None:
+    world = World()
+    issue, _run = dispatched_with_triage_run(world)
+    agent = Scripted()
+    worker(world, agent).run_once(issue, now=world.fake.now)
+    assert agent.tasks[0].head is None
+    assert agent.tasks[0].tree == {"README": "x"}  # the repository, not an empty directory
