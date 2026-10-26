@@ -1,8 +1,12 @@
 # Status
 
 Milestone 1 (the "Friday test"): one runner, one adopted project. Everything below is covered by
-tests that run against an in-memory fake of GitHub; **real GitHub was exercised on 2026-10-25** (11 live contract tests,
-see [LIVE_VALIDATION.md](LIVE_VALIDATION.md)); nothing has run against Docker or a model yet.
+tests that run against an in-memory fake of GitHub. **Live validation, 2026-10-25/26** (see
+[LIVE_VALIDATION.md](LIVE_VALIDATION.md)): 14 live contract tests against real GitHub, and one
+throwaway issue taken from `inbox` to `on_staging` with real agents (Claude Code in a `runc`
+container behind the egress proxy), about USD 1.24 up to UAT. Not yet exercised live: quota
+pauses, workflow-file pushes, the daily digest, `concert adopt`, revert PRs, conflicts on rebase,
+gVisor, and the same flow on the Colima host.
 
 ## Built
 
@@ -67,10 +71,10 @@ Left out of Milestone 1 on purpose or not reached; none needs a person except wh
 
 1. GitHub Apps (PM and Worker), installation ids, bot user ids, private keys (paths in env).
 2. A Projects v2 board with a single-select `Status` whose options are the status values.
-3. Host setup scripts with `sudo` (`ops/` in the design repo), Docker + gVisor; the agent image
-   builds with `ops/agent/build.sh`.
+3. Host setup scripts with `sudo` (`ops/` in the design repo), Docker (`runc` for now; gVisor
+   later); the agent image builds with `ops/agent/build.sh` (Claude Code, Playwright, Chromium).
 4. `process.yaml` on the staging branch (see `tests/runner/test_service.py` for a minimal one).
-5. Live validation of `RestGitHub` (GraphQL shapes, check-run/workflow mapping) and the Friday test.
+5. The Friday test on the real project (`concert adopt` first).
 
 ## Environment
 

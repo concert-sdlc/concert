@@ -158,10 +158,13 @@ its mount), and any model run.
 
 ### Result of stage 3 (2026-10-26, `runc`, real model, throwaway issue #41)
 
-One issue went from `inbox` to `uat` with every agent run in the sandbox: triage (asked five
-questions, answered by a human), triage again, spec (approved by hash), implementing, then the
-`code` and `security` reviews. The egress proxy and the container lifecycle behaved. Not yet
-reached: UAT (no runner has the `browser` capability) and everything after it.
+One issue went from `inbox` to `on_staging` with every agent run in the sandbox: triage (asked
+five questions, answered by a human), spec (approved by hash), implementing, the `code` and
+`security` reviews, automated UAT, human UAT (approved by hash), integration (the PM merged the
+PR), and staging verification. A change to `process.yaml` on `staging` in the middle made the PM
+rebase the branch and send it back through review and UAT, which also worked. Only the spec
+documents, `hello.py` and `test_hello.py` reached `staging`; no workflow file was pushed. The
+egress proxy and the container lifecycle behaved throughout.
 
 Found live, each invisible to the fake and fixed test-first:
 
@@ -171,9 +174,12 @@ Found live, each invisible to the fake and fixed test-first:
 | A triage run had no head commit and so saw an empty repository. | Head-less runs read the base branch. |
 | A reviewer that ran the tests left `__pycache__/*.pyc`; the run was refused as "not text". | `__pycache__` ignored in the workspace, `PYTHONDONTWRITEBYTECODE=1` in the container. |
 | CI skipped on a draft PR was recorded as a failure, and GitHub's newest-first order let it replace a later success. | A skipped run is no verdict; the newest run per check wins (`core/verdicts.py`). |
+| After the rebase the PM recorded the stale code review of an older run (old head) and the gate waited for ever; no command recovers `human_uat`, only `/pm reset #N in_review`. | `accept_handoff` ignores review and UAT reports from a run that started on an older head. |
+| Requests to `127.0.0.1` inside the sandbox went through the egress proxy (405). | `NO_PROXY` is loopback only. |
+| UAT and staging verification need the `browser` capability; the image had no browser. | The image carries pinned Playwright and Chromium (`CHROMIUM_ARGS`, build check); the runner declares `browser`. The image is 2 GB. |
 | With `max_parallel: 1` the second reviewer was never assigned and the first looped on lease expiry. | A run with a valid report posted keeps its lease and frees its slot. |
 
-Cost, from the Console: **USD 1.24** for the whole stage (about ten agent runs, 1.14 M input and
+Cost, from the Console, up to the first `uat`: **USD 1.24** (about ten agent runs, 1.14 M input and
 22 k output tokens, model `claude-opus-5-5`), including the runs the permission bug wasted. About
 USD 0.12 a run, roughly USD 1 for a tiny issue through review. The runner does not record cost;
 read it from the Console Cost page.
